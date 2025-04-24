@@ -17,7 +17,8 @@ use pumpkin_protocol::{
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::item::ItemStack;
 use tokio::sync::Mutex;
-
+use pumpkin_data::block::Block;
+use pumpkin_util::math::position::BlockPos;
 use super::EntityBase;
 use super::{Entity, EntityId, NBTStorage, effect::Effect};
 
@@ -182,6 +183,17 @@ impl LivingEntity {
         amount > 0.0
     }
 
+    // Check if the entity is in water
+    pub async fn is_in_water(&self) -> bool {
+        let world = self.entity.world.read().await;
+        let pos = self.entity.pos.load();
+        // Use the floor function to get the block position correctly (e.g. 1.5 -> 1, -1.5 -> -2)
+        let block_pos = BlockPos::new(pos.x.floor() as i32,
+                                      pos.y.floor() as i32, pos.z.floor() as i32);
+        let block = world.get_block(&block_pos).await.unwrap();
+        block.eq(&Block::WATER)
+    }
+
     pub async fn update_fall_distance(
         &self,
         height_difference: f64,
@@ -190,7 +202,7 @@ impl LivingEntity {
     ) {
         if ground {
             let fall_distance = self.fall_distance.swap(0.0);
-            if fall_distance <= 0.0 || dont_damage {
+            if fall_distance <= 0.0 || dont_damage || self.is_in_water().await {
                 return;
             }
 
