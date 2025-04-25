@@ -17,7 +17,6 @@ use pumpkin_protocol::{
     client::play::{CDamageEvent, CSetEquipment, EquipmentSlot, MetaDataType, Metadata},
     codec::item_stack_seralizer::ItemStackSerializer,
 };
-use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::item::ItemStack;
 use tokio::sync::Mutex;
@@ -186,15 +185,12 @@ impl LivingEntity {
     // Check if the entity is in water
     pub async fn is_in_water(&self) -> bool {
         let world = self.entity.world.read().await;
-        let pos = self.entity.pos.load();
-        // Use the floor function to get the block position correctly (e.g. 1.5 -> 1, -1.5 -> -2)
-        let block_pos = BlockPos::new(
-            pos.x.floor() as i32,
-            pos.y.floor() as i32,
-            pos.z.floor() as i32,
-        );
-        let block = world.get_block(&block_pos).await.unwrap();
-        block.eq(&Block::WATER)
+        let block_pos = self.entity.block_pos.load();
+        if let Ok(block) = world.get_block(&block_pos).await {
+            block.eq(&Block::WATER)
+        } else {
+            false
+        }
     }
 
     pub async fn update_fall_distance(
