@@ -65,7 +65,7 @@ impl ThrownItemEntity {
                 next_triangular(0.0, 0.017_227_5 * uncertainty),
                 next_triangular(0.0, 0.017_227_5 * uncertainty),
             )
-            .multiply(power, power, power);
+            .multiply_raw(power, power, power);
         self.entity.velocity.store(velocity);
         let len = velocity.horizontal_length();
         self.entity.set_rotation(

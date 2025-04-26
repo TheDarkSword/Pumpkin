@@ -15,6 +15,14 @@ impl<T: Math + Copy> Vector3<T> {
         Vector3 { x, y, z }
     }
 
+    pub fn zero() -> Vector3<f64> {
+        Vector3 {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        }
+    }
+
     pub fn length_squared(&self) -> T {
         self.x * self.x + self.y * self.y + self.z * self.z
     }
@@ -47,8 +55,24 @@ impl<T: Math + Copy> Vector3<T> {
         }
     }
 
-    pub fn multiply(self, x: T, y: T, z: T) -> Self {
-        Self {
+    pub fn sub_raw(&self, x: T, y: T, z: T) -> Self {
+        Vector3 {
+            x: self.x - x,
+            y: self.y - y,
+            z: self.z - z,
+        }
+    }
+
+    pub fn multiply(&self, other: &Vector3<T>) -> Self {
+        Vector3 {
+            x: self.x * other.x,
+            y: self.y * other.y,
+            z: self.z * other.z,
+        }
+    }
+
+    pub fn multiply_raw(self, x: T, y: T, z: T) -> Self {
+        Vector3 {
             x: self.x * x,
             y: self.y * y,
             z: self.z * z,

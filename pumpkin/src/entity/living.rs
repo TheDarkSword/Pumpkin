@@ -1,15 +1,14 @@
 use std::sync::atomic::AtomicU8;
 use std::{collections::HashMap, sync::atomic::AtomicI32};
-
+use std::sync::Arc;
 use super::EntityBase;
 use super::{Entity, EntityId, NBTStorage, effect::Effect};
 use crate::server::Server;
 use async_trait::async_trait;
 use crossbeam::atomic::AtomicCell;
 use pumpkin_config::advanced_config;
-use pumpkin_data::block::Block;
-use pumpkin_data::entity::{EffectType, EntityStatus};
-use pumpkin_data::{damage::DamageType, sound::Sound};
+use pumpkin_data::entity::{EffectType, EntityStatus, EntityType};
+use pumpkin_data::{damage::DamageType};
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_protocol::client::play::{CHurtAnimation, CTakeItemEntity};
 use pumpkin_protocol::codec::var_int::VarInt;
@@ -20,6 +19,7 @@ use pumpkin_protocol::{
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::item::ItemStack;
 use tokio::sync::Mutex;
+use crate::entity::item::ItemEntity;
 
 /// Represents a living entity within the game world.
 ///
@@ -36,8 +36,6 @@ pub struct LivingEntity {
     /// The current health level of the entity.
     pub health: AtomicCell<f32>,
     pub death_time: AtomicU8,
-    /// The distance the entity has been falling.
-    pub fall_distance: AtomicCell<f32>,
     pub active_effects: Mutex<HashMap<EffectType, Effect>>,
 }
 impl LivingEntity {
@@ -48,7 +46,6 @@ impl LivingEntity {
             time_until_regen: AtomicI32::new(0),
             last_damage_taken: AtomicCell::new(0.0),
             health: AtomicCell::new(20.0),
-            fall_distance: AtomicCell::new(0.0),
             death_time: AtomicU8::new(0),
             active_effects: Mutex::new(HashMap::new()),
         }
@@ -188,54 +185,6 @@ impl LivingEntity {
         amount > 0.0
     }
 
-    // Check if the entity is in water
-    pub async fn is_in_water(&self) -> bool {
-        let world = self.entity.world.read().await;
-        let block_pos = self.entity.block_pos.load();
-        world
-            .get_block(&block_pos)
-            .await
-            .is_ok_and(|block| block == Block::WATER)
-    }
-
-    pub async fn update_fall_distance(
-        &self,
-        height_difference: f64,
-        ground: bool,
-        dont_damage: bool,
-    ) {
-        if ground {
-            let fall_distance = self.fall_distance.swap(0.0);
-            if fall_distance <= 0.0 || dont_damage || self.is_in_water().await {
-                return;
-            }
-
-            let safe_fall_distance = 3.0;
-            let mut damage = fall_distance - safe_fall_distance;
-            damage = (damage).ceil();
-
-            // TODO: Play block fall sound
-            let check_damage = self.damage(damage, DamageType::FALL).await; // Fall
-            if check_damage {
-                self.entity
-                    .play_sound(Self::get_fall_sound(fall_distance as i32))
-                    .await;
-            }
-        } else if height_difference < 0.0 {
-            let distance = self.fall_distance.load();
-            self.fall_distance
-                .store(distance - (height_difference as f32));
-        }
-    }
-
-    fn get_fall_sound(distance: i32) -> Sound {
-        if distance > 4 {
-            Sound::EntityGenericBigFall
-        } else {
-            Sound::EntityGenericSmallFall
-        }
-    }
-
     /// Kills the Entity
     ///
     /// This is similar to `kill` but Spawn Particles, Animation and plays death sound
@@ -252,6 +201,62 @@ impl LivingEntity {
                 EntityStatus::PlayDeathSoundOrAddProjectileHitParticles,
             )
             .await;
+    }
+    
+    pub async fn create_item_to_drop(
+        &self,
+        item_id: u16,
+        count: u32,
+        randomize_motion: bool,
+    ) -> Option<Arc<ItemEntity>> {
+        if count == 0 {
+            None
+        } else {
+            let position = self.entity.pos.load();
+            let height = position.y + self.entity.standing_eye_height as f64 - 0.3;
+            let location = Vector3::new(
+                position.x,
+                height,
+                position.z,
+            );
+            let entity = self
+                .entity
+                .world
+                .read()
+                .await
+                .create_entity(location, EntityType::ITEM);
+            // TODO: Merge stacks together
+            let item_entity: Arc<ItemEntity> = Arc::new(ItemEntity::new(entity, item_id, count).await);
+            
+            if randomize_motion {
+                let f = rand::random::<f64>() * 0.5;
+                let f1 = rand::random::<f64>() * std::f64::consts::TAU;
+                item_entity.get_entity().set_velocity(
+                    Vector3::new(
+                        -f1.sin() * f,
+                        0.2,
+                        f1.cos() * f,
+                    ),
+                ).await;
+            } else {
+                let yaw = self.entity.yaw.load() as f64;
+                let pitch = self.entity.pitch.load() as f64;
+
+                let yaw_rad = yaw.to_radians();
+                let pitch_rad = pitch.to_radians();
+
+                let speed = 0.3;
+                let natural_adjustment = rand::random::<f64>() * std::f64::consts::TAU;
+                let randomized_natural_adjustment_speed = 0.02 * rand::random::<f64>();
+                
+                let vel_x = -yaw_rad.sin() * pitch_rad.cos() * speed + natural_adjustment.cos() * randomized_natural_adjustment_speed;
+                let vel_y = -pitch_rad.sin() * speed + 0.1 + (rand::random::<f64>() - rand::random::<f64>()) * 0.1;
+                let vel_z = yaw_rad.cos() * pitch_rad.cos() * speed + natural_adjustment.sin() * randomized_natural_adjustment_speed;
+
+                item_entity.get_entity().set_velocity(Vector3::new(vel_x, vel_y, vel_z)).await;
+            }
+            Some(item_entity)
+        }
     }
 }
 

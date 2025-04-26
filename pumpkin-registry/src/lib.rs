@@ -95,6 +95,172 @@ impl DimensionType {
             Self::TheNether => Identifier::vanilla("the_nether"),
         }
     }
+    
+    pub fn fixed_time(&self) -> Option<i64> {
+        match self {
+            Self::Overworld => None,
+            Self::OverworldCaves => None,
+            Self::TheEnd => Some(6000),
+            Self::TheNether => Some(18000),
+        }
+    }
+    
+    pub fn has_skylight(&self) -> bool {
+        match self {
+            Self::Overworld => true,
+            Self::OverworldCaves => true,
+            Self::TheEnd => false,
+            Self::TheNether => false,
+        }
+    }
+    
+    pub fn has_ceiling(&self) -> bool {
+        match self {
+            Self::Overworld => false,
+            Self::OverworldCaves => true,
+            Self::TheEnd => false,
+            Self::TheNether => true,
+        }
+    }
+    
+    pub fn ultra_warm(&self) -> bool {
+        match self {
+            Self::Overworld => false,
+            Self::OverworldCaves => false,
+            Self::TheEnd => false,
+            Self::TheNether => true,
+        }
+    }
+    
+    pub fn natural(&self) -> bool {
+        match self {
+            Self::Overworld => true,
+            Self::OverworldCaves => true,
+            Self::TheEnd => false,
+            Self::TheNether => false,
+        }
+    }
+    
+    pub fn coordinate_scale(&self) -> f64 {
+        match self {
+            Self::Overworld => 1.0,
+            Self::OverworldCaves => 1.0,
+            Self::TheEnd => 1.0,
+            Self::TheNether => 8.0,
+        }
+    }
+    
+    pub fn bed_works(&self) -> bool {
+        match self {
+            Self::Overworld => true,
+            Self::OverworldCaves => true,
+            Self::TheEnd => false,
+            Self::TheNether => false,
+        }
+    }
+    
+    pub fn respawn_anchor_works(&self) -> bool {
+        match self {
+            Self::Overworld => false,
+            Self::OverworldCaves => false,
+            Self::TheEnd => false,
+            Self::TheNether => true,
+        }
+    }
+    
+    pub fn min_y(&self) -> i32 {
+        match self {
+            Self::Overworld => -64,
+            Self::OverworldCaves => -64,
+            Self::TheEnd => 0,
+            Self::TheNether => 0,
+        }
+    }
+    
+    pub fn height(&self) -> i32 {
+        match self {
+            Self::Overworld => 384,
+            Self::OverworldCaves => 384,
+            Self::TheEnd => 256,
+            Self::TheNether => 256,
+        }
+    }
+    
+    pub fn logical_height(&self) -> i32 {
+        match self {
+            Self::Overworld => 384,
+            Self::OverworldCaves => 384,
+            Self::TheEnd => 256,
+            Self::TheNether => 128,
+        }
+    }
+    
+    // Is this correct?
+    pub fn infiniburn(&self) -> Identifier {
+        match self {
+            Self::Overworld => Identifier::vanilla("minecraft:infiniburn_overworld"),
+            Self::OverworldCaves => Identifier::vanilla("minecraft:infiniburn_overworld"),
+            Self::TheEnd => Identifier::vanilla("minecraft:infiniburn_end"),
+            Self::TheNether => Identifier::vanilla("minecraft:infiniburn_nether"),
+        }
+    }
+
+    // Is this correct?
+    pub fn effects(&self) -> Identifier {
+        match self {
+            Self::Overworld => Identifier::vanilla("minecraft:overworld"),
+            Self::OverworldCaves => Identifier::vanilla("minecraft:overworld"),
+            Self::TheEnd => Identifier::vanilla("minecraft:end"),
+            Self::TheNether => Identifier::vanilla("minecraft:the_nether"),
+        }
+    }
+    
+    pub fn ambient_light(&self) -> f32 {
+        match self {
+            Self::Overworld => 0.0,
+            Self::OverworldCaves => 0.0,
+            Self::TheEnd => 0.0,
+            Self::TheNether => 0.1,
+        }
+    }
+    
+    pub fn piglin_safe(&self) -> bool {
+        match self {
+            Self::Overworld => false,
+            Self::OverworldCaves => false,
+            Self::TheEnd => false,
+            Self::TheNether => true,
+        }
+    }
+    
+    pub fn has_raids(&self) -> bool {
+        match self {
+            Self::Overworld => true,
+            Self::OverworldCaves => true,
+            Self::TheEnd => true,
+            Self::TheNether => false,
+        }
+    }
+    
+    // Make int supplier like in java?
+    /// This is a tuple of (min, max); you can use it to get a random number between the two values.
+    pub fn monster_spawn_light_test(&self) -> (i32, i32) {
+        match self {
+            Self::Overworld => (0, 7),
+            Self::OverworldCaves => (0, 7),
+            Self::TheEnd => (0, 7),
+            Self::TheNether => (7, 7),
+        }
+    }
+    
+    pub fn monster_spawn_block_light_limit(&self) -> i32 {
+        match self {
+            Self::Overworld => 0,
+            Self::OverworldCaves => 0,
+            Self::TheEnd => 15,
+            Self::TheNether => 0,
+        }
+    }
 }
 
 impl Registry {

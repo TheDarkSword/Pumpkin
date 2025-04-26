@@ -6,7 +6,7 @@ use crossbeam::atomic::AtomicCell;
 use living::LivingEntity;
 use player::Player;
 use pumpkin_data::{
-    block::{Facing, HorizontalFacing},
+    block::{Block, Facing, HorizontalFacing},
     damage::DamageType,
     entity::{EntityPose, EntityType},
     sound::{Sound, SoundCategory},
@@ -36,8 +36,11 @@ use std::{
         atomic::{AtomicBool, AtomicI32, Ordering},
     },
 };
+use std::any::Any;
 use tokio::sync::RwLock;
-
+use pumpkin_data::block::BlockState;
+use crate::util::collision_util::CollisionUtil;
+use pumpkin_util::math::voxel_shape::VoxelShape;
 use crate::world::World;
 
 pub mod ai;
@@ -56,7 +59,7 @@ mod combat;
 pub type EntityId = i32;
 
 #[async_trait]
-pub trait EntityBase: Send + Sync {
+pub trait EntityBase: Any + Send + Sync {
     /// Gets Called every tick
     async fn tick(&self, server: &Server) {
         if let Some(living) = self.get_living_entity() {
@@ -75,10 +78,115 @@ pub trait EntityBase: Send + Sync {
         }
     }
 
+    /// Returns the entity's current gravity value.
+    fn get_gravity(&self) -> f64 {
+        // In Vanilla if an entity has no gravity tag, it returns 0, otherwise get_default_gravity
+        self.get_default_gravity()
+    }
+
+    /// Returns the entity's current default gravity value.
+    fn get_default_gravity(&self) -> f64 {
+        0.0
+    }
+
+    /// Called every tick to move the entity, can be overridden
+    async fn tick_move(&self, mut movement: Vector3<f64>) {
+        let entity = self.get_entity();
+        let original_pos = movement.clone();
+        let stuck_speed_multiplier = entity.stuck_speed_multiplier.load();
+        
+        // if noPhysics is set, do entity.set_pos
+        // else
+        // In Vanilla the method is called "move" and take the move type other than movement vector
+        // In this spot is checked if the movement is piston and 3/4 line of code is executed, 
+        // then this is the continuation of the code
+        
+        if stuck_speed_multiplier.length_squared() > 1.0E-7 {
+            movement = movement.multiply(&stuck_speed_multiplier);
+            entity.stuck_speed_multiplier.store(Vector3::<f64>::zero());
+            entity.set_velocity(Vector3::<f64>::zero()).await;
+        }
+        
+        movement = self.maybe_back_off_from_edge(movement).await;
+        
+        let collision_movement = entity.collide(movement).await;
+        
+        // If movement changed by collision, update the velocity
+        if collision_movement != movement {
+            let mut velocity = entity.velocity.load();
+
+            if collision_movement.y != movement.y {
+                velocity.y = 0.0;
+            }
+
+            if collision_movement.x != movement.x {
+                velocity.x = 0.0;
+            }
+
+            if collision_movement.z != movement.z {
+                velocity.z = 0.0;
+            }
+
+            entity.velocity.store(velocity);
+
+        }
+        
+        let new_pos = original_pos.add(&collision_movement);
+        entity.set_pos(new_pos);
+        
+        //let was_on_ground = entity.on_ground.load(Ordering::Relaxed);
+        entity.on_ground.store(
+            collision_movement.y != movement.y && movement.y < 0.0,
+            Ordering::Relaxed,
+        );
+
+        if entity.on_ground.load(Ordering::Relaxed) {
+            entity.update_fall_distance(
+                movement.y,
+                true,
+                false, // non abbiamo ancora implementato i modfiers che annullano il danno
+            ).await;
+        } else if movement.y != collision_movement.y {
+            // L'entità ha colpito qualcosa durante la caduta, ma non è atterrata a terra
+            entity.update_fall_distance(movement.y, false, false).await;
+        }
+
+    }
+    
+    /// Called when the entity is stuck in a block, is overridden by player, spider e whiter boss
+    async fn make_stuck_in_block(&self, block_state: &BlockState, motion_multiplier: Vector3<f64>) {
+        let entity = self.get_entity();
+        entity.fall_distance.store(0.0);
+        entity.stuck_speed_multiplier.store(motion_multiplier);
+    }
+    
+    /// Called only in tick_move, is overridden by the player
+    async fn maybe_back_off_from_edge(&self, movement: Vector3<f64>) -> Vector3<f64> {
+        movement
+    }
+    
+    async fn get_block_pos_below_that_affects_my_movement(&self) -> BlockPos {
+        self.get_entity().get_on_pos(0.500001).await
+    }
+
     /// Called when a player collides with a entity
     async fn on_player_collision(&self, _player: Arc<Player>) {}
     fn get_entity(&self) -> &Entity;
     fn get_living_entity(&self) -> Option<&LivingEntity>;
+}
+
+
+impl dyn EntityBase {
+    /// Tries to downcast the `Arc<dyn EntityBase>` to `Arc<T>`, where `T` is a concrete type that implements `EntityBase`.
+    pub fn downcast_arc<T: EntityBase + 'static>(
+        self: Arc<Self>
+    ) -> Result<Arc<T>, Arc<Self>> {
+        let any: Arc<dyn Any + Send + Sync> = self.clone();
+        match Arc::downcast::<T>(any) {
+            Ok(concrete) => Ok(concrete),
+            Err(_any)  => Err(self),  // If the downcast fails, return the original `Arc<dyn EntityBase>`
+        }
+    }
 }
 
 static CURRENT_ID: AtomicI32 = AtomicI32::new(0);
@@ -127,6 +235,12 @@ pub struct Entity {
     pub invulnerable: AtomicBool,
     /// List of damage types this entity is immune to
     pub damage_immunities: Vec<DamageType>,
+    /// Holds the entity's current tick count
+    pub tick_count: AtomicI32,
+    /// The speed multiplier for the entity when stuck, is used when the entity is in cobwebs or other blocks like that
+    pub stuck_speed_multiplier: AtomicCell<Vector3<f64>>,
+    /// The distance the entity has been falling.
+    pub fall_distance: AtomicCell<f32>,
 }
 
 impl Entity {
@@ -173,6 +287,9 @@ impl Entity {
             bounding_box_size: AtomicCell::new(bounding_box_size),
             invulnerable: AtomicBool::new(invulnerable),
             damage_immunities: Vec::new(),
+            tick_count: AtomicI32::new(0),
+            stuck_speed_multiplier: AtomicCell::new(Vector3::new(0.0, 0.0, 0.0)),
+            fall_distance: AtomicCell::new(0.0),
         }
     }
 
@@ -495,14 +612,123 @@ impl Entity {
         // }
     }
 
-    fn tick_move(&self) {
-        let velo = self.velocity.load();
+    // Check if the entity is in water
+    pub async fn is_in_water(&self) -> bool {
+        self.is_in_fluid(Block::WATER).await
+    }
+
+    // Check if the entity is in water
+    pub async fn is_in_lava(&self) -> bool {
+        self.is_in_fluid(Block::LAVA).await
+    }
+
+    // Check if the entity is in water
+    async fn is_in_fluid(&self, fluid_block: Block) -> bool {
+        let world = self.world.read().await;
+        let block_pos = self.block_pos.load();
+        world
+            .get_block(&block_pos)
+            .await
+            .is_ok_and(|block| block == fluid_block)
+    }
+
+    pub async fn apply_gravity(&self) {
+        let gravity = self.get_gravity();
+        if gravity != 0.0 {
+            let mut velocity = self.velocity.load();
+            velocity.y -= gravity;
+            self.set_velocity(velocity).await;
+        }
+    }
+
+    pub async fn update_fall_distance(
+        &self,
+        height_difference: f64,
+        ground: bool,
+        dont_damage: bool,
+    ) {
+        if ground {
+            let fall_distance = self.fall_distance.swap(0.0);
+            if fall_distance <= 0.0 || dont_damage || self.is_in_water().await {
+                return;
+            }
+
+            let safe_fall_distance = 3.0;
+            let mut damage = fall_distance - safe_fall_distance;
+            damage = (damage).ceil();
+
+            // TODO: Play block fall sound
+            let check_damage = self.damage(damage, DamageType::FALL).await; // Fall
+            if check_damage {
+                self.play_sound(Self::get_fall_sound(fall_distance as i32)).await;
+            }
+        } else if height_difference < 0.0 {
+            let distance = self.fall_distance.load();
+            self.fall_distance
+                .store(distance - (height_difference as f32));
+        }
+    }
+
+    fn get_fall_sound(distance: i32) -> Sound {
+        if distance > 4 {
+            Sound::EntityGenericBigFall
+        } else {
+            Sound::EntityGenericSmallFall
+        }
+    }
+    
+    async fn collide(&self, movement: Vector3<f64>) -> Vector3<f64> {
+        if movement.x == 0.0 && movement.y == 0.0 && movement.z == 0.0 {
+            return movement;
+        }
+        let current_box = self.bounding_box.load();
+        let world = self.world.read().await;
+        
+        let potential_collisions_voxel: Vec<(BlockPos, VoxelShape)> = CollisionUtil::get_potential_shapes(&world, &current_box, &movement).await;
+        let potential_collisions_bounding_box: Vec<BoundingBox> = CollisionUtil::get_entity_collisions(&world, self.entity_id, &current_box).await;
+        
+        let initial_collision_box;
+        if movement.x == 0.0 && movement.z == 0.0 {
+            initial_collision_box = if movement.y < 0.0 {
+                CollisionUtil::cut_dawnwards(&current_box, movement.y)
+            } else {
+                CollisionUtil::cut_upwards(&current_box, movement.y)
+            };
+        } else {
+            initial_collision_box = current_box.expand_towards(movement.x, movement.y, movement.z);
+        }
+
+        let mut result_movement = movement.clone();
+
+        for (_, voxel_shape) in &potential_collisions_voxel {
+            result_movement = voxel_shape.calculate_collision_offset(&initial_collision_box, result_movement);
+            
+            // If the movement is zero, break out of the loop
+            if result_movement.x == 0.0 && result_movement.y == 0.0 && result_movement.z == 0.0 {
+                return Vector3::<f64>::zero();
+            }
+        }
+
+        // Now handle the collisions with entities
+        for entity_box in &potential_collisions_bounding_box {
+            let entity_shape = VoxelShape::new(entity_box.clone());
+            result_movement = entity_shape.calculate_collision_offset(&initial_collision_box, result_movement);
+
+            // If the movement is zero, break out of the loop
+            if result_movement.x == 0.0 && result_movement.y == 0.0 && result_movement.z == 0.0 {
+                return Vector3::<f64>::zero();
+            }
+        }
+        
+        result_movement
+    }
+    
+    pub async fn get_on_pos(&self, y_offset: f64) -> BlockPos {
         let pos = self.pos.load();
-        self.pos
-            .store(Vector3::new(pos.x + velo.x, pos.y + velo.y, pos.z + velo.z));
-        let multiplier = f64::from(Self::velocity_multiplier(pos));
-        self.velocity
-            .store(velo.multiply(multiplier, 1.0, multiplier));
+        let x = pos.x.floor() as i32;
+        let y = (pos.y - y_offset).floor() as i32;
+        let z = pos.z.floor() as i32;
+        BlockPos(Vector3::new(x, y, z))
     }
 }
 
@@ -513,7 +739,7 @@ impl EntityBase for Entity {
     }
 
     async fn tick(&self, _: &Server) {
-        self.tick_move();
+        
     }
 
     fn get_entity(&self) -> &Entity {

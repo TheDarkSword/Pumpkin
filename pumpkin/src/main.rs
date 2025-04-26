@@ -64,6 +64,7 @@ pub mod net;
 pub mod plugin;
 pub mod server;
 pub mod world;
+pub mod util;
 
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]

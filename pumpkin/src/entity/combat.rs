@@ -26,7 +26,7 @@ impl AttackType {
 
         let sprinting = entity.sprinting.load(std::sync::atomic::Ordering::Relaxed);
         let on_ground = entity.on_ground.load(std::sync::atomic::Ordering::Relaxed);
-        let fall_distance = player.living_entity.fall_distance.load();
+        let fall_distance = entity.fall_distance.load();
         let sword = player
             .inventory()
             .lock()
@@ -70,7 +70,7 @@ pub async fn handle_knockback(attacker: &Entity, world: &World, victim: &Entity,
 
     let packet = CEntityVelocity::new(entity_id, victim_velocity);
     let velocity = attacker.velocity.load();
-    attacker.velocity.store(velocity.multiply(0.6, 1.0, 0.6));
+    attacker.velocity.store(velocity.multiply_raw(0.6, 1.0, 0.6));
 
     victim.velocity.store(saved_velo);
     world.broadcast_packet_all(&packet).await;

@@ -32,6 +32,7 @@ pub mod net;
 pub mod plugin;
 pub mod server;
 pub mod world;
+pub mod util;
 
 const GIT_VERSION: &str = env!("GIT_VERSION");
 

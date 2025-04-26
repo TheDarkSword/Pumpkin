@@ -15,7 +15,6 @@ use super::{
     combat::{self, AttackType, player_attack_sound},
     effect::Effect,
     hunger::HungerManager,
-    item::ItemEntity,
 };
 use crate::{
     block,
@@ -1241,15 +1240,12 @@ impl Player {
     }
 
     pub async fn drop_item(&self, item_id: u16, count: u32) {
-        let entity = self
-            .world()
-            .await
-            .create_entity(self.living_entity.entity.pos.load(), EntityType::ITEM);
-
-        // TODO: Merge stacks together
-        let item_entity = Arc::new(ItemEntity::new(entity, item_id, count).await);
-        self.world().await.spawn_entity(item_entity.clone()).await;
-        item_entity.send_meta_packet().await;
+        let item_entity = self.living_entity.create_item_to_drop(item_id, count, false).await;
+        
+        if let Some(item_entity) = item_entity {
+            self.world().await.spawn_entity(item_entity.clone()).await;
+            item_entity.send_meta_packet().await;
+        }
     }
 
     pub async fn drop_held_item(&self, drop_stack: bool) {

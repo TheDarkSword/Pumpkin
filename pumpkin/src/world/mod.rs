@@ -71,6 +71,7 @@ use tokio::{
     select,
     sync::{Mutex, mpsc::UnboundedReceiver},
 };
+use pumpkin_util::math::boundingbox::BoundingBox;
 
 pub mod border;
 pub mod bossbar;
@@ -387,6 +388,8 @@ impl World {
 
         // Entity ticks
         for entity in entities_to_tick {
+            // Before tick, updates entity tick count
+            entity.get_entity().tick_count.fetch_add(1, Ordering::Relaxed);
             entity.tick(server).await;
             // This boolean thing prevents deadlocks. Since we lock players, we can't broadcast packets.
             let mut collied_player = None;
@@ -1687,5 +1690,42 @@ impl World {
         let mut chunk: tokio::sync::RwLockWriteGuard<ChunkData> = chunk.write().await;
         chunk.block_entities.remove(block_pos);
         chunk.dirty = true;
+    }
+
+    pub async fn get_entities_in_box(&self, box_: &BoundingBox) -> Vec<Arc<dyn EntityBase>> {
+        let entities = self.entities.read().await;
+        let mut result = Vec::new();
+
+        for entity in entities.values() {
+            let entity_box = entity.get_entity().bounding_box.load();
+            if entity_box.intersects(box_) {
+                result.push(entity.clone());
+            }
+        }
+
+        result
+    }
+
+    pub async fn get_entities_in_box_of_type<T>(&self, box_: &BoundingBox, entity_type: EntityType) -> Vec<Arc<T>> where T: EntityBase + 'static {
+        let entities = self.entities.read().await;
+        let mut result = Vec::new();
+
+        for entity_arc in entities.values() {
+            let bbox_e = entity_arc.get_entity().bounding_box.load();
+
+            if entity_arc.get_entity().entity_type != entity_type {
+                continue;
+            }
+
+            if !bbox_e.intersects(box_) {
+                continue;
+            }
+
+            if let Ok(concrete) = Arc::clone(entity_arc).downcast_arc::<T>() {
+                result.push(concrete);
+            }
+        }
+
+        result
     }
 }

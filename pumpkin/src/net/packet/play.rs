@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::block;
 use crate::block::registry::BlockActionResult;
-use crate::entity::mob;
+use crate::entity::{mob, EntityBase};
 use crate::entity::player::ChatSession;
 use crate::net::PlayerConfig;
 use crate::plugin::player::player_chat::PlayerChatEvent;
@@ -311,7 +311,7 @@ impl Player {
                 }
 
                 if !self.abilities.lock().await.flying {
-                    self.living_entity
+                    self.get_entity()
                         .update_fall_distance(
                             height_difference,
                             packet.ground,
@@ -431,7 +431,7 @@ impl Player {
                     )
                     .await;
                 if !self.abilities.lock().await.flying {
-                    self.living_entity
+                    self.get_entity()
                         .update_fall_distance(
                             height_difference,
                             packet.ground,
@@ -1355,7 +1355,7 @@ impl Player {
         // Set the flying ability
         let flying = player_abilities.flags & 0x02 != 0 && abilities.allow_flying;
         if flying {
-            self.living_entity.fall_distance.store(0.0);
+            self.get_entity().fall_distance.store(0.0);
         }
         abilities.flying = flying;
     }

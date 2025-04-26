@@ -26,10 +26,30 @@ impl BoundingBox {
         }
     }
 
+    pub fn expand_towards(&self, x: f64, y: f64, z: f64) -> Self {
+        let min_x = if x < 0.0 { self.min.x + x } else { self.min.x };
+        let min_y = if y < 0.0 { self.min.y + y } else { self.min.y };
+        let min_z = if z < 0.0 { self.min.z + z } else { self.min.z };
+        let max_x = if x > 0.0 { self.max.x + x } else { self.max.x };
+        let max_y = if y > 0.0 { self.max.y + y } else { self.max.y };
+        let max_z = if z > 0.0 { self.max.z + z } else { self.max.z };
+        Self {
+            min: Vector3::new(min_x, min_y, min_z),
+            max: Vector3::new(max_x, max_y, max_z),
+        }
+    }
+
     pub fn offset(&self, other: Self) -> Self {
         Self {
             min: self.min.add(&other.min),
             max: self.max.add(&other.max),
+        }
+    }
+
+    pub fn offset_raw(&self, x: f64, y: f64, z: f64) -> Self {
+        Self {
+            min: self.min.add_raw(x, y, z),
+            max: self.max.add_raw(x, y, z),
         }
     }
 
