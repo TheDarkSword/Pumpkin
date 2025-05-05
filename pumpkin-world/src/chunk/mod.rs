@@ -126,8 +126,6 @@ pub struct ChunkData {
 pub struct ChunkEntityData {
     pub chunk_position: Vector2<i32>,
     pub data: HashMap<Uuid, NbtCompound>,
-
-    pub dirty: bool,
 }
 
 /// Represents pure block data for a chunk.

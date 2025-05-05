@@ -346,13 +346,12 @@ impl PathFromLevelFolder for ChunkEntityData {
 
 impl Dirtiable for ChunkEntityData {
     #[inline]
-    fn mark_dirty(&mut self, flag: bool) {
-        self.dirty = flag;
-    }
+    fn mark_dirty(&mut self, _flag: bool) {}
 
     #[inline]
     fn is_dirty(&self) -> bool {
-        self.dirty
+        // It is reasonable to assume that this will always be dirty due to the nature of entities
+        true
     }
 }
 
@@ -415,8 +414,6 @@ impl ChunkEntityData {
         Ok(ChunkEntityData {
             chunk_position: position,
             data: entities,
-            // This chunk is read from disk, so it has not been modified
-            dirty: false,
         })
     }
 

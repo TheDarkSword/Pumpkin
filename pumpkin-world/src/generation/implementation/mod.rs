@@ -106,8 +106,6 @@ impl WorldGenerator for VanillaGenerator {
         crate::chunk::ChunkEntityData {
             chunk_position: *at,
             data: HashMap::new(),
-            // TODO: not write to disk, since empty
-            dirty: false,
         }
     }
 }

@@ -1,10 +1,13 @@
 use std::{num::NonZeroU8, sync::Arc};
 
 use pumpkin_config::BASIC_CONFIG;
-use pumpkin_protocol::client::play::{CCenterChunk, CUnloadChunk};
+use pumpkin_protocol::{
+    client::play::{CCenterChunk, CRemoveEntities, CUnloadChunk},
+    codec::var_int::VarInt,
+};
 use pumpkin_world::cylindrical_chunk_iterator::Cylindrical;
 
-use crate::entity::{Entity, player::Player};
+use crate::entity::player::Player;
 
 pub async fn get_view_distance(player: &Player) -> NonZeroU8 {
     player
@@ -91,17 +94,20 @@ pub async fn update_position(player: &Arc<Player>) {
                     .client
                     .enqueue_packet(&CUnloadChunk::new(chunk.x, chunk.z))
                     .await;
+
+                let entity_ids: Vec<_> = player
+                    .world()
+                    .await
+                    .get_entity_ids_for_chunk(chunk)
+                    .await
+                    .iter()
+                    .map(|id| VarInt(*id))
+                    .collect();
+                player
+                    .client
+                    .enqueue_packet(&CRemoveEntities::new(&entity_ids))
+                    .await;
             }
-            // Now lets clean the entity chunks and also remove all the entities out of the world
-            let world = player.world().await;
-            for chunk_pos in &chunks_to_clean {
-                let entity_chunk = world.get_entity_chunk_from_chunk_coords(*chunk_pos).await;
-                let chunk = entity_chunk.read().await;
-                let entities = Entity::from_data(&chunk.data, world.clone()).await;
-                let entities: Vec<&Entity> = entities.iter().map(|e| e.get_entity()).collect();
-                world.remove_entities(&entities).await;
-            }
-            level.clean_entity_chunks(&chunks_to_clean).await;
         }
 
         if !loading_chunks.is_empty() {
