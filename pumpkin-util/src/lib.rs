@@ -1,3 +1,4 @@
+use enum_dispatch::enum_dispatch;
 use num_derive::{FromPrimitive, ToPrimitive};
 use pumpkin_nbt::compound::NbtCompound;
 use serde::{Deserialize, Serialize};
@@ -119,12 +120,6 @@ impl<T> IndexMut<usize> for MutableSplitSlice<'_, T> {
             &mut self.end[index - self.start.len() - 1]
         }
     }
-}
-
-pub trait NBTSerializable: Sized {
-    fn read_nbt(nbt: &NbtCompound) -> Option<Self>;
-
-    fn write_nbt(&self, nbt: &mut NbtCompound);
 }
 
 #[macro_export]
