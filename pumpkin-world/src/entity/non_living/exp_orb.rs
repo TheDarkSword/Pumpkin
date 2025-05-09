@@ -1,29 +1,17 @@
-use pumpkin_nbt::compound::NbtCompound;
+use serde::{Deserialize, Serialize};
 
 use crate::entity::NonPlayerCommon;
 
+#[derive(Serialize, Deserialize)]
 pub struct ExpOrb {
+    #[serde(flatten)]
     pub common: NonPlayerCommon,
+    #[serde(rename = "Age")]
     pub age_ticks: i16,
+    #[serde(rename = "Count")]
     pub merge_count: i32,
+    #[serde(rename = "Health")]
     pub health: i16,
+    #[serde(rename = "Value")]
     pub value: i16,
-}
-
-impl ExpOrb {
-    pub(crate) fn from_nbt(nbt: &NbtCompound) -> Option<Self> {
-        let common = NonPlayerCommon::from_nbt(nbt)?;
-        let age_ticks = nbt.get_short("Age")?;
-        let merge_count = nbt.get_int("Count")?;
-        let health = nbt.get_short("Health")?;
-        let value = nbt.get_short("Value")?;
-
-        Some(Self {
-            common,
-            age_ticks,
-            merge_count,
-            health,
-            value,
-        })
-    }
 }

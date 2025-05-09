@@ -3,22 +3,11 @@ use std::{
     sync::atomic::{AtomicI32, Ordering},
 };
 
-use enum_dispatch::enum_dispatch;
 use living::zombie::ZombieCommon;
 use non_living::{exp_orb::ExpOrb, item::Item, projectile::Projectile, tnt::Tnt};
 use pumpkin_data::entity::{EffectType, EntityType};
-use pumpkin_nbt::{compound::NbtCompound, nbt_int_array};
-use pumpkin_util::{
-    math::{
-        position::BlockPos,
-        vector2::Vector2,
-        vector3::{Math, Vector3},
-    },
-    text::TextComponent,
-};
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de::DeserializeOwned};
-
-use crate::generation::positions::chunk_pos;
+use pumpkin_util::{math::vector3::Vector3, text::TextComponent};
+use serde::{Deserialize, Serialize};
 
 pub mod entity_data_flags;
 pub mod living;
@@ -66,9 +55,106 @@ mod nbt_entity_type {
         let value: &str = Deserialize::deserialize(d)?;
         let id = value
             .strip_prefix("minecraft:")
-            .ok_or_else(|| de::Error::custom("Invalid minecraft entity resource id"))?;
+            .ok_or_else(|| de::Error::custom(format!("Invalid entity resource id {value}")))?;
         EntityType::from_name(id)
-            .ok_or_else(|| de::Error::custom(format!("Unknown minecraft entity resource id {id}")))
+            .ok_or_else(|| de::Error::custom(format!("Unknown entity resource id {id}")))
+    }
+}
+
+mod nbt_item_stack {
+    use pumpkin_data::item::Item;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+
+    use crate::item::ItemStack;
+
+    fn default_count() -> i32 {
+        1
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct NbtRepr {
+        id: String,
+        #[serde(default = "default_count")]
+        count: i32,
+        // TODO: components
+    }
+
+    pub fn serialize<S>(v: &ItemStack, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        NbtRepr {
+            id: format!("minecraft:{}", v.item.registry_key),
+            count: v.item_count as i32,
+        }
+        .serialize(s)
+    }
+
+    pub fn deserialize<'de, D>(d: D) -> Result<ItemStack, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let data: NbtRepr = Deserialize::deserialize(d)?;
+        let id = data
+            .id
+            .strip_prefix("minecraft:")
+            .ok_or_else(|| de::Error::custom(format!("Invalid item resource id {}", data.id)))?;
+        let item = Item::from_registry_key(id)
+            .ok_or_else(|| de::Error::custom(format!("Unknown item resource id {}", data.id)))?;
+
+        Ok(ItemStack::new(data.count as u8, item))
+    }
+}
+
+mod nbt_effects {
+    use std::collections::HashMap;
+
+    use pumpkin_data::entity::EffectType;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+
+    use super::EffectData;
+
+    #[derive(Serialize, Deserialize)]
+    struct NbtRepr {
+        id: String,
+        #[serde(flatten)]
+        data: EffectData,
+    }
+
+    pub fn serialize<S>(v: &HashMap<EffectType, EffectData>, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let effects: Vec<_> = v
+            .iter()
+            .map(|(kind, data)| NbtRepr {
+                id: format!("minecraft:{}", kind.to_name()),
+                data: data.clone(),
+            })
+            .collect();
+
+        effects.serialize(s)
+    }
+
+    pub fn deserialize<'de, D>(d: D) -> Result<HashMap<EffectType, EffectData>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let effects: Vec<NbtRepr> = Deserialize::deserialize(d)?;
+        let mut mappings = Vec::with_capacity(effects.len());
+
+        for effect in effects {
+            let id = effect.id.strip_prefix("minecraft:").ok_or_else(|| {
+                de::Error::custom(format!("Invalid effect resource key: {}", effect.id))
+            })?;
+            let kind = EffectType::from_name(id).ok_or_else(|| {
+                de::Error::custom(format!("Unknown effect resource key: {}", effect.id))
+            })?;
+
+            mappings.push((kind, effect.data));
+        }
+
+        Ok(HashMap::from_iter(mappings))
     }
 }
 
@@ -163,133 +249,98 @@ mod nbt_uuid {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum Entity {
     Living(LivingEntity),
     NonLiving(NonLivingEntity),
 }
 
-impl Entity {
-    // TODO: We can probably use serde for this instead of parsing nbt compounds, but that is
-    // somewhat difficult due to data being slightly different that what is serialized in NBTs such
-    // as UUIDs. This is all doable in serde, but I think that should be a task for another time
-
-    fn from_nbt(nbt: &NbtCompound) -> Option<Self> {
-        let id = nbt.get_string("id")?;
-        let kind = EntityType::from_name(&id.replace("minecraft:", ""))?;
-        match kind {
-            EntityType::ZOMBIE | EntityType::DROWNED => Some(Entity::Living(
-                LivingEntity::ZombieLike(ZombieCommon::from_nbt(nbt)?),
-            )),
-            EntityType::EXPERIENCE_ORB => Some(Entity::NonLiving(NonLivingEntity::ExpOrb(
-                ExpOrb::from_nbt(nbt)?,
-            ))),
-            _ => None,
-        }
-    }
-}
-
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "id")]
 pub enum LivingEntity {
+    #[serde(untagged, rename = "minecraft:zombie", alias = "minecraft:drowned")]
     ZombieLike(ZombieCommon),
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "id")]
 pub enum NonLivingEntity {
+    #[serde(untagged, rename = "minecraft:item")]
     Item(Item),
+    #[serde(
+        untagged,
+        rename = "minecraft:arrow",
+        alias = "minecraft:breeze_wind_charge",
+        alias = "minecraft:dragon_fireball",
+        alias = "minecraft:egg",
+        alias = "minecraft:ender_pearl",
+        alias = "minecraft:experience_bottle",
+        alias = "minecraft:eye_of_ender",
+        alias = "minecraft:fireball",
+        alias = "minecraft:firework_rocket",
+        alias = "minecraft:llama_spit",
+        alias = "minecraft:potion",
+        alias = "minecraft:shulker_bullet",
+        alias = "minecraft:small_fireball",
+        alias = "minecraft:snowball",
+        alias = "minecraft:spectral_arrow",
+        alias = "minecraft:trident",
+        alias = "minecraft:wind_charge",
+        alias = "minecraft:wither_skull"
+    )]
     Projectile(Projectile),
+    #[serde(untagged, rename = "minecraft:tnt")]
     Tnt(Tnt),
+    #[serde(untagged, rename = "minecraft:experience_orb")]
     ExpOrb(ExpOrb),
 }
 
 pub type EntityId = i32;
 static CURRENT_ID: AtomicI32 = AtomicI32::new(0);
 
-#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
 pub struct EffectData {
     pub duration: i32,
-    pub amplifier: u8,
+    pub amplifier: i8,
     pub ambient: bool,
     pub show_particles: bool,
     pub show_icon: bool,
+    #[serde(default)]
     pub blend: bool,
     // TODO: Hidden effect
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct MobCommon {
+    #[serde(flatten)]
     pub living_common: LivingCommon,
+    #[serde(flatten)]
     pub non_player_common: NonPlayerCommon,
 }
 
-impl MobCommon {
-    fn from_nbt(nbt: &NbtCompound) -> Option<Self> {
-        let living_common = LivingCommon::from_nbt(nbt)?;
-        let non_player_common = NonPlayerCommon::from_nbt(nbt)?;
-
-        Some(Self {
-            living_common,
-            non_player_common,
-        })
-    }
-}
-
+#[derive(Serialize, Deserialize)]
 pub struct LivingCommon {
+    #[serde(rename = "AbsorptionAmount")]
     pub absorption: f32,
+    #[serde(
+        with = "nbt_effects",
+        skip_serializing_if = "HashMap::is_empty",
+        default
+    )]
     pub active_effects: HashMap<EffectType, EffectData>,
     // TODO: Attributes
+    #[serde(rename = "CanPickUpLoot")]
     pub can_pick_up_items: bool,
+    #[serde(rename = "DeathTime")]
     pub death_ticks: i16,
     // TODO: Drop chances
     // TODO: Equipment
+    #[serde(rename = "FallFlying")]
     pub fall_flying: bool,
+    #[serde(rename = "Health")]
     pub health: f32,
     // TODO: Others
-}
-
-impl LivingCommon {
-    fn from_nbt(nbt: &NbtCompound) -> Option<Self> {
-        let absorption = nbt.get_float("AbsorptionAmount")?;
-        let mut active_effects = HashMap::new();
-
-        if let Some(effects) = nbt.get_list("active_effects") {
-            for effect_nbt in effects {
-                if let Some(effect_nbt) = effect_nbt.extract_compound() {
-                    let ambient = effect_nbt.get_bool("ambient")?;
-                    let amplifier = effect_nbt.get_byte("amplifier")? as u8;
-                    let duration = effect_nbt.get_int("duration")?;
-                    let show_icon = effect_nbt.get_bool("show_icon")?;
-                    let show_particles = effect_nbt.get_bool("show_particles")?;
-
-                    let id = effect_nbt.get_string("id")?;
-                    let kind = EffectType::from_name(&id.replace("minecraft:", ""))?;
-
-                    active_effects.insert(
-                        kind,
-                        EffectData {
-                            duration,
-                            amplifier,
-                            ambient,
-                            show_particles,
-                            show_icon,
-                            // TODO: What is this?
-                            blend: true,
-                        },
-                    );
-                }
-            }
-        }
-
-        let can_pick_up_items = nbt.get_bool("CanPickUpLoot")?;
-        let death_ticks = nbt.get_short("DeathTime")?;
-        let fall_flying = nbt.get_bool("FallFlying")?;
-        let health = nbt.get_float("Health")?;
-
-        Some(Self {
-            absorption,
-            active_effects,
-            can_pick_up_items,
-            death_ticks,
-            fall_flying,
-            health,
-        })
-    }
 }
 
 #[derive(Serialize, Deserialize)]
