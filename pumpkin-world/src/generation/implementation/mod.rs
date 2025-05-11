@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use pumpkin_data::noise_router::OVERWORLD_BASE_NOISE_ROUTER;
 use pumpkin_util::math::{vector2::Vector2, vector3::Vector3};
 
@@ -105,7 +103,9 @@ impl WorldGenerator for VanillaGenerator {
         // TODO
         crate::chunk::ChunkEntityData {
             chunk_position: *at,
-            data: HashMap::new(),
+            data: Default::default(),
+
+            dirty: false,
         }
     }
 }

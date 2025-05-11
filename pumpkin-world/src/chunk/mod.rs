@@ -1,12 +1,11 @@
 use crate::block::entities::BlockEntity;
+use crate::entity::Entity;
 use palette::{BiomePalette, BlockPalette};
-use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::nbt_long_array;
 use pumpkin_util::math::{position::BlockPos, vector2::Vector2};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
-use uuid::Uuid;
 
 use crate::BlockStateId;
 use crate::chunk::format::LightContainer;
@@ -125,7 +124,10 @@ pub struct ChunkData {
 
 pub struct ChunkEntityData {
     pub chunk_position: Vector2<i32>,
-    pub data: HashMap<Uuid, NbtCompound>,
+    /// Mapping of transient entity id to entity
+    pub data: HashMap<i32, Box<Entity>>,
+
+    pub dirty: bool,
 }
 
 /// Represents pure block data for a chunk.

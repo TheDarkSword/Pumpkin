@@ -3,6 +3,7 @@ use std::{
     sync::atomic::{AtomicI32, Ordering},
 };
 
+use enum_dispatch::enum_dispatch;
 use living::zombie::ZombieCommon;
 use non_living::{exp_orb::ExpOrb, item::Item, projectile::Projectile, tnt::Tnt};
 use pumpkin_data::entity::{EffectType, EntityType};
@@ -249,22 +250,42 @@ mod nbt_uuid {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+/// This should only be used in level due to the need to control how positions are modified
+#[enum_dispatch]
+pub(crate) trait EntityPosition {
+    fn pos(&self) -> Vector3<f64>;
+
+    fn set_pos(&mut self, pos: Vector3<f64>);
+}
+
+#[enum_dispatch]
+pub trait EntityBase {
+    /// Unique identifier for this entity. Persistent.
+    fn uuid(&self) -> uuid::Uuid;
+
+    /// Unique identifier for this entity. Transient.
+    fn id(&self) -> EntityId;
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
+#[enum_dispatch(EntityPosition, EntityBase)]
 pub enum Entity {
     Living(LivingEntity),
     NonLiving(NonLivingEntity),
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "id")]
+#[enum_dispatch(EntityPosition, EntityBase)]
 pub enum LivingEntity {
     #[serde(untagged, rename = "minecraft:zombie", alias = "minecraft:drowned")]
     ZombieLike(ZombieCommon),
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "id")]
+#[enum_dispatch(EntityPosition, EntityBase)]
 pub enum NonLivingEntity {
     #[serde(untagged, rename = "minecraft:item")]
     Item(Item),
@@ -299,7 +320,7 @@ pub enum NonLivingEntity {
 pub type EntityId = i32;
 static CURRENT_ID: AtomicI32 = AtomicI32::new(0);
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
 pub struct EffectData {
     pub duration: i32,
     pub amplifier: i8,
@@ -311,7 +332,7 @@ pub struct EffectData {
     // TODO: Hidden effect
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MobCommon {
     #[serde(flatten)]
     pub living_common: LivingCommon,
@@ -319,7 +340,7 @@ pub struct MobCommon {
     pub non_player_common: NonPlayerCommon,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LivingCommon {
     #[serde(rename = "AbsorptionAmount")]
     pub absorption: f32,
@@ -343,7 +364,7 @@ pub struct LivingCommon {
     // TODO: Others
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NonPlayerCommon {
     #[serde(rename = "id", with = "nbt_entity_type")]
     kind: EntityType,
@@ -370,12 +391,13 @@ fn assign_entity_id() -> EntityId {
     CURRENT_ID.fetch_add(1, Ordering::Relaxed)
 }
 
+#[derive(Debug, Clone)]
 pub struct Rotation {
-    yaw: f32,
-    pitch: f32,
+    pub yaw: f32,
+    pub pitch: f32,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntityCommon {
     #[serde(skip, default = "assign_entity_id")]
     id: EntityId,
@@ -402,7 +424,7 @@ pub struct EntityCommon {
     #[serde(rename = "PortalCooldown")]
     pub portal_cooldown_ticks: i32,
     #[serde(rename = "Pos", with = "nbt_vector")]
-    pub pos: Vector3<f64>,
+    pos: Vector3<f64>,
     #[serde(rename = "Rotation", with = "nbt_rotation")]
     pub rotation: Rotation,
     #[serde(default, skip_serializing_if = "Option::is_none")]

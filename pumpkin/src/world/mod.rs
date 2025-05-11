@@ -40,8 +40,6 @@ use pumpkin_data::{
     world::{RAW, WorldEvent},
 };
 use pumpkin_macros::send_cancellable;
-use pumpkin_nbt::compound::NbtCompound;
-use pumpkin_nbt::to_bytes_unnamed;
 use pumpkin_protocol::client::play::{
     CRemoveMobEffect, CSetEntityMetadata, MetaDataType, Metadata,
 };
@@ -67,11 +65,9 @@ use pumpkin_registry::DimensionType;
 use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
 use pumpkin_util::math::{position::chunk_section_from_pos, vector2::Vector2};
 use pumpkin_util::text::{TextComponent, color::NamedColor};
-use pumpkin_world::chunk::ChunkEntityData;
 use pumpkin_world::entity::entity_data_flags::{
     DATA_PLAYER_MAIN_HAND, DATA_PLAYER_MODE_CUSTOMISATION,
 };
-use pumpkin_world::level::SyncEntityChunk;
 use pumpkin_world::{
     BlockStateId, GENERATION_SETTINGS, GeneratorSetting, biome, block::entities::BlockEntity,
     level::SyncChunk,
@@ -992,7 +988,7 @@ impl World {
             rel_x * rel_x + rel_z * rel_z
         });
 
-        let mut chunk_receiver = self.receive_chunks(chunks);
+        let mut chunk_receiver = self.receive_chunks(chunks.clone());
         let level = self.level.clone();
 
         player.clone().spawn_task(async move {
@@ -1086,6 +1082,16 @@ impl World {
 
             #[cfg(debug_assertions)]
             log::debug!("Chunks queued after {}ms", inst.elapsed().as_millis());
+        });
+
+        let level = self.level.clone();
+        self.level.spawn_task(async move {
+            // Load entities
+            level
+                .entity_manager
+                .write()
+                .await
+                .cache_entity_chunks(&chunks);
         });
     }
 
@@ -1525,41 +1531,8 @@ impl World {
         receiver
     }
 
-    pub fn receive_entity_chunks(
-        &self,
-        chunks: Vec<Vector2<i32>>,
-    ) -> UnboundedReceiver<(SyncEntityChunk, bool)> {
-        let (sender, receiver) = mpsc::unbounded_channel();
-        // Put this in another thread so we aren't blocking on it
-        let level = self.level.clone();
-        self.level.spawn_task(async move {
-            let cancel_notifier = level.shutdown_notifier.notified();
-            let fetch_task = level.fetch_entities(&chunks, sender);
-
-            // Don't continue to handle chunks if we are shutting down
-            select! {
-                () = cancel_notifier => {},
-                () = fetch_task => {}
-            };
-        });
-
-        receiver
-    }
-
     pub async fn receive_chunk(&self, chunk_pos: Vector2<i32>) -> (Arc<RwLock<ChunkData>>, bool) {
         let mut receiver = self.receive_chunks(vec![chunk_pos]);
-
-        receiver
-            .recv()
-            .await
-            .expect("Channel closed for unknown reason")
-    }
-
-    pub async fn receive_entity_chunk(
-        &self,
-        chunk_pos: Vector2<i32>,
-    ) -> (Arc<RwLock<ChunkEntityData>>, bool) {
-        let mut receiver = self.receive_entity_chunks(vec![chunk_pos]);
 
         receiver
             .recv()
@@ -1649,31 +1622,6 @@ impl World {
             .filter(|entity| entity.get_entity().chunk_pos.load() == chunk_pos)
             .map(|entity| entity.get_entity().entity_id)
             .collect()
-    }
-
-    pub async fn get_entity_chunk_for_chunk(
-        &self,
-        chunk_pos: Vector2<i32>,
-    ) -> Arc<RwLock<ChunkEntityData>> {
-        // TODO: Lookup by position
-        let mut entities = Vec::new();
-
-        for entity in self
-            .entities
-            .write()
-            .await
-            .values()
-            .filter(|entity| entity.get_entity().chunk_pos.load() == chunk_pos)
-        {
-            let mut nbt = NbtCompound::new();
-            entity.write_nbt(&mut nbt).await;
-            entities.push((entity.get_entity().entity_uuid, nbt))
-        }
-
-        Arc::new(RwLock::new(ChunkEntityData {
-            chunk_position: chunk_pos,
-            data: HashMap::from_iter(entities),
-        }))
     }
 
     pub async fn get_block_state_id(

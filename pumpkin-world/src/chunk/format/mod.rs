@@ -10,12 +10,14 @@ use pumpkin_data::{Block, chunk::ChunkStatus};
 use pumpkin_nbt::{compound::NbtCompound, from_bytes, nbt_long_array};
 
 use crate::{
-    block::entities::block_entity_from_nbt, generation::section_coords, level::LevelFolder,
+    block::entities::block_entity_from_nbt,
+    entity::{Entity, EntityBase},
+    generation::section_coords,
+    level::LevelFolder,
 };
 use pumpkin_util::math::{position::BlockPos, vector2::Vector2};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
-use uuid::Uuid;
 
 use super::{
     ChunkData, ChunkEntityData, ChunkHeightmaps, ChunkLightEngine, ChunkParsingError,
@@ -346,12 +348,13 @@ impl PathFromLevelFolder for ChunkEntityData {
 
 impl Dirtiable for ChunkEntityData {
     #[inline]
-    fn mark_dirty(&mut self, _flag: bool) {}
+    fn mark_dirty(&mut self, flag: bool) {
+        self.dirty = flag;
+    }
 
     #[inline]
     fn is_dirty(&self) -> bool {
-        // It is reasonable to assume that this will always be dirty due to the nature of entities
-        true
+        self.dirty
     }
 }
 
@@ -392,36 +395,31 @@ impl ChunkEntityData {
             )));
         }
 
-        // The 128-bit UUID is stored as four 32-bit integers ([Int] Ints), ordered from most to least significant.
-        let entities: HashMap<Uuid, NbtCompound> = chunk_entity_data
-            .entities
-            .into_iter()
-            .map(|data| {
-                let uuid = data
-                    .get_int_array("UUID")
-                    .map_or_else(Uuid::new_v4, |array| {
-                        Uuid::from_u128(
-                            (array[0] as u128) << 96
-                                | (array[1] as u128) << 64
-                                | (array[2] as u128) << 32
-                                | (array[3] as u128),
-                        )
-                    });
-                (uuid, data)
-            })
-            .collect();
-
         Ok(ChunkEntityData {
             chunk_position: position,
-            data: entities,
+            data: HashMap::from_iter(
+                chunk_entity_data
+                    .entities
+                    .into_iter()
+                    .map(|entity| (entity.id(), Box::new(entity))),
+            ),
+
+            dirty: false,
         })
     }
 
     fn internal_to_bytes(&self) -> Result<Bytes, ChunkSerializingError> {
-        let nbt = EntityNbt {
+        #[derive(Serialize)]
+        struct BorrowedNbt<'a> {
+            data_version: i32,
+            position: [i32; 2],
+            entities: Box<[&'a Entity]>,
+        }
+
+        let nbt = BorrowedNbt {
             data_version: WORLD_DATA_VERSION,
             position: [self.chunk_position.x, self.chunk_position.z],
-            entities: self.data.clone().into_values().collect(),
+            entities: self.data.values().map(|entity| entity.as_ref()).collect(),
         };
 
         let mut result = Vec::new();
@@ -602,5 +600,5 @@ struct ChunkNbt {
 struct EntityNbt {
     data_version: i32,
     position: [i32; 2],
-    entities: Vec<NbtCompound>,
+    entities: Vec<Entity>,
 }
