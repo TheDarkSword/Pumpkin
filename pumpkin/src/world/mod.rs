@@ -40,6 +40,7 @@ use pumpkin_data::{
     world::{RAW, WorldEvent},
 };
 use pumpkin_macros::send_cancellable;
+use pumpkin_nbt::to_bytes_unnamed;
 use pumpkin_protocol::client::play::{
     CRemoveMobEffect, CSetEntityMetadata, MetaDataType, Metadata,
 };
@@ -901,67 +902,6 @@ impl World {
     }
 
     // NOTE: This function doesn't actually await on anything, it just spawns tokio tasks
-    fn load_entities(&self, player: Arc<Player>, chunks: Vec<Vector2<i32>>) {
-        if player
-            .client
-            .closed
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
-            log::info!("The connection has closed before entity chunks were spawned");
-            return;
-        }
-
-        let mut chunk_receiver = self.receive_entity_chunks(chunks);
-        let level = self.level.clone();
-
-        player.clone().spawn_task(async move {
-            loop {
-                let chunk_recv_result = tokio::select! {
-                    () = player.client.await_close_interrupt() => {
-                        log::debug!("Canceling player entity chunk packet processing");
-                        None
-                    },
-                    recv_result = chunk_receiver.recv() => {
-                        recv_result
-                    }
-                };
-
-                let Some((chunk, _first_load)) = chunk_recv_result else {
-                    break;
-                };
-
-                let entity_data = chunk.read().await;
-                let position = entity_data.chunk_position;
-                if !level.is_chunk_watched(&position) {
-                    // If we aren't watching this chunk, we don't need the entities
-                    // TODO: Spawn chunk logic?
-                    continue;
-                }
-
-                // TODO: World field is janky; look into it
-                let world = player.world().await;
-                let entities = Entity::from_data(&entity_data.data, world.clone()).await;
-                drop(entity_data);
-
-                let mut world_entities = world.entities.write().await;
-                for entity in &entities {
-                    let base_entity = entity.get_entity();
-                    let uuid = base_entity.entity_uuid;
-                    // If the entity did not exist in the world, lets add it to the world.
-                    // this will not spawn the entity, but just run logic for the entity
-                    world_entities.entry(uuid).or_insert(entity.clone());
-                }
-
-                log::info!(
-                    "Loaded {} entities for chunk {:?}",
-                    entities.len(),
-                    position
-                );
-            }
-        });
-    }
-
-    // NOTE: This function doesn't actually await on anything, it just spawns tokio tasks
     #[allow(clippy::too_many_lines)]
     fn spawn_world_chunks(
         &self,
@@ -1091,7 +1031,8 @@ impl World {
                 .entity_manager
                 .write()
                 .await
-                .cache_entity_chunks(&chunks);
+                .cache_entity_chunks(&chunks)
+                .await;
         });
     }
 
