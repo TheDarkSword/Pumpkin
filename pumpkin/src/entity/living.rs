@@ -354,6 +354,37 @@ impl NBTStorage for LivingEntity {
     async fn write_nbt(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
         self.entity.write_nbt(nbt).await;
         nbt.put("Health", NbtTag::Float(self.health.load()));
+        {
+            let effects = self.active_effects.lock().await;
+            if !effects.is_empty() {
+                // Iterate effects and create Box<[NbtTag]>
+                let mut effects_list = Vec::with_capacity(effects.len());
+                for effect in effects.values() {
+                    let mut effect_nbt = pumpkin_nbt::compound::NbtCompound::new();
+                    effect_nbt.put(
+                        "id",
+                        NbtTag::String(effect.r#type.to_minecraft_name().to_string()),
+                    );
+                    if effect.amplifier > 0 {
+                        effect_nbt.put("amplifier", NbtTag::Int(i32::from(effect.amplifier)));
+                    }
+                    effect_nbt.put("duration", NbtTag::Int(effect.duration));
+                    if effect.ambient {
+                        effect_nbt.put("ambient", NbtTag::Byte(1));
+                    }
+                    if !effect.show_particles {
+                        effect_nbt.put("show_particles", NbtTag::Byte(0));
+                    }
+                    let show_icon: i8 = i8::from(effect.show_icon);
+                    effect_nbt.put("show_icon", NbtTag::Byte(show_icon));
+                    effects_list.push(NbtTag::Compound(effect_nbt));
+                }
+                nbt.put(
+                    "active_effects",
+                    NbtTag::List(effects_list.into_boxed_slice()),
+                );
+            }
+        }
         //TODO: write equipment
         // todo more...
     }
@@ -361,6 +392,56 @@ impl NBTStorage for LivingEntity {
     async fn read_nbt(&mut self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
         self.entity.read_nbt(nbt).await;
         self.health.store(nbt.get_float("Health").unwrap_or(0.0));
+        {
+            let mut active_effects = self.active_effects.lock().await;
+            let nbt_effects = nbt.get_list("active_effects");
+            if let Some(nbt_effects) = nbt_effects {
+                for effect in nbt_effects {
+                    if let NbtTag::Compound(effect_nbt) = effect {
+                        let Some(effect_id) = effect_nbt.get_string("id") else {
+                            log::warn!(
+                                "Unable to read effect for entity {}. Effect id is not present",
+                                self.entity.entity_id
+                            );
+                            continue;
+                        };
+                        let Some(effect_type) = EffectType::from_minecraft_name(effect_id) else {
+                            log::warn!(
+                                "Unable to read effect for entity {}. Unknown effect type: {effect_id}",
+                                self.entity.entity_id
+                            );
+                            continue;
+                        };
+                        let amplifier = effect_nbt.get_int("amplifier").unwrap_or(0);
+                        let duration = effect_nbt.get_int("duration").unwrap_or(0);
+                        if duration <= 0 {
+                            continue;
+                        }
+                        let ambient = effect_nbt.get_byte("ambient").unwrap_or(0) == 1;
+                        let show_particles =
+                            effect_nbt.get_byte("show_particles").unwrap_or(1) == 1;
+                        let Some(show_icon) = effect_nbt.get_byte("show_icon") else {
+                            log::warn!(
+                                "Unable to read effect for entity {}. Show icon is not present",
+                                self.entity.entity_id
+                            );
+                            continue;
+                        };
+                        let show_icon = show_icon == 1;
+                        let effect = Effect {
+                            r#type: effect_type,
+                            duration,
+                            amplifier: amplifier as u8,
+                            ambient,
+                            show_particles,
+                            show_icon,
+                            blend: true, // Copied from effect give command
+                        };
+                        active_effects.insert(effect.r#type, effect);
+                    }
+                }
+            }
+        }
         // todo more...
     }
 }
