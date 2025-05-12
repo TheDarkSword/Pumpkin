@@ -90,8 +90,14 @@ impl EntityManager {
     }
 
     pub async fn cache_entity_chunks(&mut self, chunks: &[Vector2<i32>]) {
+        let chunks: Vec<_> = chunks
+            .iter()
+            .filter(|pos| !self.by_chunk.contains_key(pos))
+            .copied()
+            .collect();
+
         let (send, mut recv) = mpsc::channel(1);
-        let fetcher = self.fetch_entity_chunks(chunks, send);
+        let fetcher = self.fetch_entity_chunks(&chunks, send);
 
         // TODO: This is kinda bad
         let mut chunks = Vec::new();

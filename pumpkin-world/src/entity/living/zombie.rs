@@ -13,22 +13,44 @@ pub struct ZombieCommon {
     // TODO: Others
 }
 
-impl EntityPosition for ZombieCommon {
-    fn pos(&self) -> Vector3<f64> {
-        self.mob_common.non_player_common.common.pos
-    }
-
-    fn set_pos(&mut self, pos: Vector3<f64>) {
-        self.mob_common.non_player_common.common.pos = pos;
-    }
+macro_rules! auto_struct {
+    ($s:ident) => {
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        #[serde(transparent)]
+        pub struct $s(pub ZombieCommon);
+    };
 }
 
-impl EntityBase for ZombieCommon {
-    fn uuid(&self) -> uuid::Uuid {
-        self.mob_common.non_player_common.common.uuid()
-    }
+macro_rules! auto_trait {
+    ($s:ident) => {
+        impl EntityPosition for $s {
+            fn pos(&self) -> Vector3<f64> {
+                self.0.mob_common.non_player_common.common.pos
+            }
 
-    fn id(&self) -> EntityId {
-        self.mob_common.non_player_common.common.id()
-    }
+            fn set_pos(&mut self, pos: Vector3<f64>) {
+                self.0.mob_common.non_player_common.common.pos = pos;
+            }
+        }
+
+        impl EntityBase for $s {
+            fn uuid(&self) -> uuid::Uuid {
+                self.0.mob_common.non_player_common.common.uuid()
+            }
+
+            fn id(&self) -> EntityId {
+                self.0.mob_common.non_player_common.common.id()
+            }
+        }
+    };
 }
+
+macro_rules! auto_define {
+    ($s:ident) => {
+        auto_struct!($s);
+        auto_trait!($s);
+    };
+}
+
+auto_define!(Zombie);
+auto_define!(Drowned);

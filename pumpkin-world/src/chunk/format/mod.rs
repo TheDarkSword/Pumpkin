@@ -605,7 +605,6 @@ struct EntityNbt {
 
 #[cfg(test)]
 mod test {
-    use pumpkin_data::entity::EntityType;
     use pumpkin_util::{global_path, math::vector2::Vector2};
     use tokio::sync::mpsc;
 
@@ -614,7 +613,7 @@ mod test {
             ChunkEntityData,
             io::{ChunkSerializer, LoadedData},
         },
-        entity::{Entity, LivingEntity},
+        entity::{Entity, EntityBase},
     };
 
     use super::anvil::chunk::AnvilChunkFile;
@@ -629,32 +628,26 @@ mod test {
                 file.get_chunks(&[Vector2::new(-1, -1)], send).await;
 
                 match recv.recv().await.expect("We asked for a chunk") {
-                    LoadedData::Loaded(data) => {
-                        let mut zombie = false;
-                        let mut drowned = false;
+                    LoadedData::Loaded(mut data) => {
+                        let mut zombie = None;
+                        let mut drowned = None;
                         for (_, entity) in data.data.iter() {
                             match entity.as_ref() {
-                                Entity::Living(entity) => match entity {
-                                    LivingEntity::ZombieLike(entity) => {
-                                        let kind = entity.mob_common.non_player_common.kind();
-
-                                        if matches!(kind, EntityType::ZOMBIE) {
-                                            zombie = true;
-                                        }
-
-                                        if matches!(kind, EntityType::DROWNED) {
-                                            drowned = true;
-                                        }
-                                    }
-                                    _ => panic!("Wrong entity type!"),
-                                },
-                                Entity::NonLiving(_) => panic!("Wrong entity type!"),
+                                Entity::Zombie(entity) => {
+                                    zombie = Some(entity.uuid());
+                                }
+                                Entity::Drowned(entity) => {
+                                    drowned = Some(entity.uuid());
+                                }
+                                _ => panic!("Wrong entity type!"),
                             }
                         }
 
-                        assert!(zombie);
-                        assert!(drowned);
+                        assert!(zombie.is_some());
+                        assert!(drowned.is_some());
                         assert_eq!(data.data.len(), 2);
+
+                        data.dirty = true;
                     }
                     LoadedData::Missing(pos) => panic!("Chunk {:?} does not exist", pos),
                     LoadedData::Error((pos, err)) => panic!("Chunk {:?} failed: {:?}", pos, err),

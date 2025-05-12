@@ -928,9 +928,20 @@ impl World {
             rel_x * rel_x + rel_z * rel_z
         });
 
-        let mut chunk_receiver = self.receive_chunks(chunks.clone());
         let level = self.level.clone();
+        let entity_chunks = chunks.clone();
+        self.level.spawn_task(async move {
+            // Load entities
+            level
+                .entity_manager
+                .write()
+                .await
+                .cache_entity_chunks(&entity_chunks)
+                .await;
+        });
 
+        let mut chunk_receiver = self.receive_chunks(chunks);
+        let level = self.level.clone();
         player.clone().spawn_task(async move {
             'main: loop {
                 let chunk_recv_result = tokio::select! {
@@ -1022,17 +1033,6 @@ impl World {
 
             #[cfg(debug_assertions)]
             log::debug!("Chunks queued after {}ms", inst.elapsed().as_millis());
-        });
-
-        let level = self.level.clone();
-        self.level.spawn_task(async move {
-            // Load entities
-            level
-                .entity_manager
-                .write()
-                .await
-                .cache_entity_chunks(&chunks)
-                .await;
         });
     }
 

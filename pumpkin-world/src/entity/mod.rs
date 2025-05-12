@@ -4,16 +4,19 @@ use std::{
 };
 
 use enum_dispatch::enum_dispatch;
-use living::zombie::ZombieCommon;
-use non_living::{exp_orb::ExpOrb, item::Item, projectile::Projectile, tnt::Tnt};
-use pumpkin_data::entity::{EffectType, EntityType};
-use pumpkin_nbt::deserializer::deserialize_nbt_bool;
+use living::zombie::{Drowned, Zombie};
+use non_living::{exp_orb::ExpOrb, item::Item, projectile::*, tnt::Tnt};
+use pumpkin_data::entity::EffectType;
+use pumpkin_nbt::{compound::NbtCompound, deserializer::deserialize_nbt_bool};
 use pumpkin_util::{math::vector3::Vector3, text::TextComponent};
 use serde::{Deserialize, Serialize};
 
 pub mod entity_data_flags;
 pub mod living;
 pub mod non_living;
+
+pub type EntityId = i32;
+static CURRENT_ID: AtomicI32 = AtomicI32::new(0);
 
 // Helper methods for converting values to their nbt forms
 mod nbt_vector {
@@ -36,30 +39,6 @@ mod nbt_vector {
     {
         let value: [T; 3] = Deserialize::deserialize(d)?;
         Ok(Vector3::new(value[0], value[1], value[2]))
-    }
-}
-
-mod nbt_entity_type {
-    use pumpkin_data::entity::EntityType;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
-
-    pub fn serialize<S>(v: &EntityType, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        format!("minecraft:{}", v.resource_name).serialize(s)
-    }
-
-    pub fn deserialize<'de, D>(d: D) -> Result<EntityType, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value: String = Deserialize::deserialize(d)?;
-        let id = value
-            .strip_prefix("minecraft:")
-            .ok_or_else(|| de::Error::custom(format!("Invalid entity resource id {value}")))?;
-        EntityType::from_name(id)
-            .ok_or_else(|| de::Error::custom(format!("Unknown entity resource id {id}")))
     }
 }
 
@@ -268,58 +247,90 @@ pub trait EntityBase {
     fn id(&self) -> EntityId;
 }
 
+impl EntityPosition for NbtCompound {
+    fn set_pos(&mut self, pos: Vector3<f64>) {
+        todo!();
+    }
+
+    fn pos(&self) -> Vector3<f64> {
+        let result: Option<Vector3<f64>> = { None };
+
+        todo!();
+    }
+}
+
+impl EntityBase for NbtCompound {
+    fn id(&self) -> EntityId {
+        todo!();
+    }
+
+    fn uuid(&self) -> uuid::Uuid {
+        todo!();
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
+#[serde(tag = "id")]
 #[enum_dispatch(EntityPosition, EntityBase)]
 pub enum Entity {
-    Living(LivingEntity),
-    NonLiving(NonLivingEntity),
-}
+    // - Living -
+    #[serde(rename = "minecraft:zombie")]
+    Zombie(Zombie),
+    #[serde(rename = "minecraft:drowned")]
+    Drowned(Drowned),
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "id")]
-#[enum_dispatch(EntityPosition, EntityBase)]
-pub enum LivingEntity {
-    #[serde(untagged, alias = "minecraft:zombie", alias = "minecraft:drowned")]
-    ZombieLike(ZombieCommon),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "id")]
-#[enum_dispatch(EntityPosition, EntityBase)]
-pub enum NonLivingEntity {
-    #[serde(untagged, alias = "minecraft:item")]
+    // - Non-Living -
+    #[serde(rename = "minecraft:item")]
     Item(Item),
-    #[serde(
-        untagged,
-        alias = "minecraft:arrow",
-        alias = "minecraft:breeze_wind_charge",
-        alias = "minecraft:dragon_fireball",
-        alias = "minecraft:egg",
-        alias = "minecraft:ender_pearl",
-        alias = "minecraft:experience_bottle",
-        alias = "minecraft:eye_of_ender",
-        alias = "minecraft:fireball",
-        alias = "minecraft:firework_rocket",
-        alias = "minecraft:llama_spit",
-        alias = "minecraft:potion",
-        alias = "minecraft:shulker_bullet",
-        alias = "minecraft:small_fireball",
-        alias = "minecraft:snowball",
-        alias = "minecraft:spectral_arrow",
-        alias = "minecraft:trident",
-        alias = "minecraft:wind_charge",
-        alias = "minecraft:wither_skull"
-    )]
-    Projectile(Projectile),
-    #[serde(untagged, alias = "minecraft:tnt")]
-    Tnt(Tnt),
-    #[serde(untagged, alias = "minecraft:experience_orb")]
-    ExpOrb(ExpOrb),
-}
 
-pub type EntityId = i32;
-static CURRENT_ID: AtomicI32 = AtomicI32::new(0);
+    // Projectiles
+    #[serde(rename = "minecraft:arrow")]
+    Arrow(Arrow),
+    #[serde(rename = "minecraft:breeze_wind_charge")]
+    BreezeWindCharge(BreezeWindCharge),
+    #[serde(rename = "minecraft:dragon_fireball")]
+    DragonFireball(DragonFireball),
+    #[serde(rename = "minecraft:egg")]
+    Egg(Egg),
+    #[serde(rename = "minecraft:ender_pearl")]
+    EnderPearl(EnderPearl),
+    #[serde(rename = "minecraft:experience_bottle")]
+    ExpBottle(ExpBottle),
+    #[serde(rename = "minecraft:eye_of_ender")]
+    EnderEye(EnderEye),
+    #[serde(rename = "minecraft:fireball")]
+    Fireball(Fireball),
+    #[serde(rename = "minecraft:firework_rocket")]
+    Firework(Firework),
+    #[serde(rename = "minecraft:llama_spit")]
+    LlamaSpit(LlamaSpit),
+    #[serde(rename = "minecraft:potion")]
+    Potion(Potion),
+    #[serde(rename = "minecraft:shulker_bullet")]
+    ShulkerBullet(ShulkerBullet),
+    #[serde(rename = "minecraft:small_fireball")]
+    SmallFireball(SmallFireball),
+    #[serde(rename = "minecraft:snowball")]
+    Snowball(Snowball),
+    #[serde(rename = "minecraft:spectral_arrow")]
+    SpectralArrow(SpectralArrow),
+    #[serde(rename = "minecraft:trident")]
+    Trident(Trident),
+    #[serde(rename = "minecraft:wind_charge")]
+    WindCharge(WindCharge),
+    #[serde(rename = "minecraft:wither_skull")]
+    WitherSkull(WitherSkull),
+
+    // Misc
+    #[serde(rename = "minecraft:tnt")]
+    Tnt(Tnt),
+    #[serde(rename = "minecraft:experience_orb")]
+    ExpOrb(ExpOrb),
+
+    // Unknown
+    #[serde(untagged)]
+    Generic(NbtCompound),
+}
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
 pub struct EffectData {
@@ -370,8 +381,6 @@ pub struct LivingCommon {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NonPlayerCommon {
-    #[serde(rename = "id", with = "nbt_entity_type")]
-    kind: EntityType,
     #[serde(flatten)]
     pub common: EntityCommon,
     #[serde(
@@ -387,12 +396,6 @@ pub struct NonPlayerCommon {
         deserialize_with = "deserialize_nbt_bool"
     )]
     pub custom_name_visible: bool,
-}
-
-impl NonPlayerCommon {
-    pub fn kind(&self) -> EntityType {
-        self.kind
-    }
 }
 
 fn assign_entity_id() -> EntityId {
