@@ -7,6 +7,7 @@ use enum_dispatch::enum_dispatch;
 use living::zombie::ZombieCommon;
 use non_living::{exp_orb::ExpOrb, item::Item, projectile::Projectile, tnt::Tnt};
 use pumpkin_data::entity::{EffectType, EntityType};
+use pumpkin_nbt::deserializer::deserialize_nbt_bool;
 use pumpkin_util::{math::vector3::Vector3, text::TextComponent};
 use serde::{Deserialize, Serialize};
 
@@ -53,7 +54,7 @@ mod nbt_entity_type {
     where
         D: Deserializer<'de>,
     {
-        let value: &str = Deserialize::deserialize(d)?;
+        let value: String = Deserialize::deserialize(d)?;
         let id = value
             .strip_prefix("minecraft:")
             .ok_or_else(|| de::Error::custom(format!("Invalid entity resource id {value}")))?;
@@ -279,7 +280,7 @@ pub enum Entity {
 #[serde(tag = "id")]
 #[enum_dispatch(EntityPosition, EntityBase)]
 pub enum LivingEntity {
-    #[serde(untagged, rename = "minecraft:zombie", alias = "minecraft:drowned")]
+    #[serde(untagged, alias = "minecraft:zombie", alias = "minecraft:drowned")]
     ZombieLike(ZombieCommon),
 }
 
@@ -287,11 +288,11 @@ pub enum LivingEntity {
 #[serde(tag = "id")]
 #[enum_dispatch(EntityPosition, EntityBase)]
 pub enum NonLivingEntity {
-    #[serde(untagged, rename = "minecraft:item")]
+    #[serde(untagged, alias = "minecraft:item")]
     Item(Item),
     #[serde(
         untagged,
-        rename = "minecraft:arrow",
+        alias = "minecraft:arrow",
         alias = "minecraft:breeze_wind_charge",
         alias = "minecraft:dragon_fireball",
         alias = "minecraft:egg",
@@ -311,9 +312,9 @@ pub enum NonLivingEntity {
         alias = "minecraft:wither_skull"
     )]
     Projectile(Projectile),
-    #[serde(untagged, rename = "minecraft:tnt")]
+    #[serde(untagged, alias = "minecraft:tnt")]
     Tnt(Tnt),
-    #[serde(untagged, rename = "minecraft:experience_orb")]
+    #[serde(untagged, alias = "minecraft:experience_orb")]
     ExpOrb(ExpOrb),
 }
 
@@ -324,10 +325,13 @@ static CURRENT_ID: AtomicI32 = AtomicI32::new(0);
 pub struct EffectData {
     pub duration: i32,
     pub amplifier: i8,
+    #[serde(deserialize_with = "deserialize_nbt_bool")]
     pub ambient: bool,
+    #[serde(deserialize_with = "deserialize_nbt_bool")]
     pub show_particles: bool,
+    #[serde(deserialize_with = "deserialize_nbt_bool")]
     pub show_icon: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_nbt_bool")]
     pub blend: bool,
     // TODO: Hidden effect
 }
@@ -351,13 +355,13 @@ pub struct LivingCommon {
     )]
     pub active_effects: HashMap<EffectType, EffectData>,
     // TODO: Attributes
-    #[serde(rename = "CanPickUpLoot")]
+    #[serde(rename = "CanPickUpLoot", deserialize_with = "deserialize_nbt_bool")]
     pub can_pick_up_items: bool,
     #[serde(rename = "DeathTime")]
     pub death_ticks: i16,
     // TODO: Drop chances
     // TODO: Equipment
-    #[serde(rename = "FallFlying")]
+    #[serde(rename = "FallFlying", deserialize_with = "deserialize_nbt_bool")]
     pub fall_flying: bool,
     #[serde(rename = "Health")]
     pub health: f32,
@@ -377,8 +381,12 @@ pub struct NonPlayerCommon {
         skip_serializing_if = "Option::is_none"
     )]
     pub custom_name: Option<TextComponent>,
-    #[serde(rename = "CustomNameVisible", default)]
-    pub custom_name_visible: Option<bool>,
+    #[serde(
+        rename = "CustomNameVisible",
+        default,
+        deserialize_with = "deserialize_nbt_bool"
+    )]
+    pub custom_name_visible: bool,
 }
 
 impl NonPlayerCommon {
@@ -408,17 +416,25 @@ pub struct EntityCommon {
     pub fall_distance: f64,
     #[serde(rename = "Fire")]
     pub fire_ticks: i16,
-    #[serde(rename = "Glowing")]
+    #[serde(rename = "Glowing", default, deserialize_with = "deserialize_nbt_bool")]
     pub glowing: bool,
-    #[serde(rename = "HasVisualFire")]
+    #[serde(
+        rename = "HasVisualFire",
+        default,
+        deserialize_with = "deserialize_nbt_bool"
+    )]
     pub visual_fire: bool,
-    #[serde(rename = "Invulnerable")]
+    #[serde(rename = "Invulnerable", deserialize_with = "deserialize_nbt_bool")]
     pub invulnerable: bool,
     #[serde(rename = "Motion", with = "nbt_vector")]
     pub velocity: Vector3<f64>,
-    #[serde(rename = "NoGravity")]
+    #[serde(
+        rename = "NoGravity",
+        default,
+        deserialize_with = "deserialize_nbt_bool"
+    )]
     pub no_gravity: bool,
-    #[serde(rename = "OnGround")]
+    #[serde(rename = "OnGround", deserialize_with = "deserialize_nbt_bool")]
     pub on_ground: bool,
     //TODO: passengers
     #[serde(rename = "PortalCooldown")]
@@ -427,8 +443,8 @@ pub struct EntityCommon {
     pos: Vector3<f64>,
     #[serde(rename = "Rotation", with = "nbt_rotation")]
     pub rotation: Rotation,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub silent: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_nbt_bool")]
+    pub silent: bool,
     //TODO: scoreboard tags
 }
 

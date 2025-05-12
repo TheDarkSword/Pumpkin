@@ -1,3 +1,4 @@
+use pumpkin_nbt::deserializer::deserialize_nbt_bool;
 use pumpkin_util::math::vector3::Vector3;
 use serde::{Deserialize, Serialize};
 
@@ -7,7 +8,7 @@ use crate::entity::{EntityBase, EntityId, EntityPosition, MobCommon};
 pub struct ZombieCommon {
     #[serde(flatten)]
     pub mob_common: MobCommon,
-    #[serde(rename = "IsBaby", default)]
+    #[serde(rename = "IsBaby", default, deserialize_with = "deserialize_nbt_bool")]
     pub is_baby: bool,
     // TODO: Others
 }

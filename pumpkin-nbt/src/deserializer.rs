@@ -147,6 +147,100 @@ where
     T::deserialize(&mut deserializer)
 }
 
+/// Converts bytes to booleans for when serde must deserialize to a map first
+pub fn deserialize_nbt_bool<'de, D>(deserializer: D) -> std::result::Result<bool, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    struct TruthyVisitor;
+
+    impl de::Visitor<'_> for TruthyVisitor {
+        type Value = bool;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a byte or boolean value")
+        }
+
+        fn visit_bool<E>(self, v: bool) -> std::result::Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(v)
+        }
+
+        fn visit_i8<E>(self, v: i8) -> std::result::Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(v != 0)
+        }
+
+        fn visit_u8<E>(self, v: u8) -> std::result::Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(v != 0)
+        }
+    }
+
+    deserializer.deserialize_any(TruthyVisitor)
+}
+
+/// Converts bytes to booleans for when serde must deserialize to a map first
+pub fn deserialize_optional_nbt_bool<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<bool>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    struct TruthyVisitor;
+
+    impl<'de> de::Visitor<'de> for TruthyVisitor {
+        type Value = Option<bool>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("some byte or boolean value")
+        }
+
+        fn visit_bool<E>(self, v: bool) -> std::result::Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(Some(v))
+        }
+
+        fn visit_i8<E>(self, v: i8) -> std::result::Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(Some(v != 0))
+        }
+
+        fn visit_u8<E>(self, v: u8) -> std::result::Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(Some(v != 0))
+        }
+
+        fn visit_some<D>(self, deserializer: D) -> std::result::Result<Self::Value, D::Error>
+        where
+            D: de::Deserializer<'de>,
+        {
+            Ok(Some(bool::deserialize(deserializer)?))
+        }
+
+        fn visit_none<E>(self) -> std::result::Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(None)
+        }
+    }
+
+    deserializer.deserialize_any(TruthyVisitor)
+}
+
 impl<'de, R: Read> de::Deserializer<'de> for &mut Deserializer<R> {
     type Error = Error;
 
@@ -264,20 +358,18 @@ impl<'de, R: Read> de::Deserializer<'de> for &mut Deserializer<R> {
     where
         V: Visitor<'de>,
     {
-        if let Some(tag_id) = self.tag_to_deserialize_stack.last() {
-            if *tag_id == BYTE_ID {
-                let value = self.input.get_u8_be()?;
-                if value != 0 {
-                    visitor.visit_bool(true)
-                } else {
-                    visitor.visit_bool(false)
+        if let Some(tag_id) = self.tag_to_deserialize_stack.pop() {
+            let truthy = match tag_id {
+                BYTE_ID => self.input.get_i8_be()? != 0,
+                _ => {
+                    return Err(Error::UnsupportedType(format!(
+                        "Non-byte bool (found type {})",
+                        tag_id
+                    )));
                 }
-            } else {
-                Err(Error::UnsupportedType(format!(
-                    "Non-byte bool (found type {})",
-                    tag_id
-                )))
-            }
+            };
+
+            visitor.visit_bool(truthy)
         } else {
             Err(Error::SerdeError(
                 "Wanted to deserialize a bool, but there was no type hint on the stack!"

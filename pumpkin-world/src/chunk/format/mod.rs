@@ -7,7 +7,7 @@ use std::{
 use anvil::{WORLD_DATA_VERSION, chunk::SingleChunkDataSerializer};
 use bytes::Bytes;
 use pumpkin_data::{Block, chunk::ChunkStatus};
-use pumpkin_nbt::{compound::NbtCompound, from_bytes, nbt_long_array};
+use pumpkin_nbt::{compound::NbtCompound, nbt_long_array};
 
 use crate::{
     block::entities::block_entity_from_nbt,
@@ -104,7 +104,7 @@ impl ChunkData {
         position: Vector2<i32>,
     ) -> Result<Self, ChunkParsingError> {
         // TODO: Implement chunk stages?
-        if from_bytes::<ChunkStatusWrapper>(chunk_data)
+        if pumpkin_nbt::from_bytes::<ChunkStatusWrapper>(chunk_data)
             .map_err(ChunkParsingError::FailedReadStatus)?
             .status
             != ChunkStatus::Full
@@ -112,7 +112,7 @@ impl ChunkData {
             return Err(ChunkParsingError::ChunkNotGenerated);
         }
 
-        let chunk_data = from_bytes::<ChunkNbt>(chunk_data)
+        let chunk_data = pumpkin_nbt::from_bytes::<ChunkNbt>(chunk_data)
             .map_err(|e| ChunkParsingError::ErrorDeserializingChunk(e.to_string()))?;
 
         if chunk_data.light_correct {
@@ -380,7 +380,7 @@ impl ChunkEntityData {
         chunk_data: &[u8],
         position: Vector2<i32>,
     ) -> Result<Self, ChunkParsingError> {
-        let chunk_entity_data = from_bytes::<EntityNbt>(chunk_data)
+        let chunk_entity_data = pumpkin_nbt::from_bytes::<EntityNbt>(chunk_data)
             .map_err(|e| ChunkParsingError::ErrorDeserializingChunk(e.to_string()))?;
 
         if chunk_entity_data.position[0] != position.x
@@ -601,4 +601,66 @@ struct EntityNbt {
     data_version: i32,
     position: [i32; 2],
     entities: Vec<Entity>,
+}
+
+#[cfg(test)]
+mod test {
+    use pumpkin_data::entity::EntityType;
+    use pumpkin_util::{global_path, math::vector2::Vector2};
+    use tokio::sync::mpsc;
+
+    use crate::{
+        chunk::{
+            ChunkEntityData,
+            io::{ChunkSerializer, LoadedData},
+        },
+        entity::{Entity, LivingEntity},
+    };
+
+    use super::anvil::chunk::AnvilChunkFile;
+
+    #[tokio::test]
+    async fn test_read_entities() {
+        let path = global_path!("../../../assets/entity_test.mca");
+
+        match AnvilChunkFile::<ChunkEntityData>::read(path).await {
+            Ok(file) => {
+                let (send, mut recv) = mpsc::channel(1);
+                file.get_chunks(&[Vector2::new(-1, -1)], send).await;
+
+                match recv.recv().await.expect("We asked for a chunk") {
+                    LoadedData::Loaded(data) => {
+                        let mut zombie = false;
+                        let mut drowned = false;
+                        for (_, entity) in data.data.iter() {
+                            match entity.as_ref() {
+                                Entity::Living(entity) => match entity {
+                                    LivingEntity::ZombieLike(entity) => {
+                                        let kind = entity.mob_common.non_player_common.kind();
+
+                                        if matches!(kind, EntityType::ZOMBIE) {
+                                            zombie = true;
+                                        }
+
+                                        if matches!(kind, EntityType::DROWNED) {
+                                            drowned = true;
+                                        }
+                                    }
+                                    _ => panic!("Wrong entity type!"),
+                                },
+                                Entity::NonLiving(_) => panic!("Wrong entity type!"),
+                            }
+                        }
+
+                        assert!(zombie);
+                        assert!(drowned);
+                        assert_eq!(data.data.len(), 2);
+                    }
+                    LoadedData::Missing(pos) => panic!("Chunk {:?} does not exist", pos),
+                    LoadedData::Error((pos, err)) => panic!("Chunk {:?} failed: {:?}", pos, err),
+                }
+            }
+            Err(err) => panic!("Failed to parse entity data file: {:?}", err),
+        }
+    }
 }
