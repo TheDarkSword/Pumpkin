@@ -7,7 +7,7 @@ use enum_dispatch::enum_dispatch;
 use living::zombie::{Drowned, Zombie};
 use non_living::{exp_orb::ExpOrb, item::Item, projectile::*, tnt::Tnt};
 use pumpkin_data::entity::EffectType;
-use pumpkin_nbt::{compound::NbtCompound, deserializer::deserialize_nbt_bool};
+use pumpkin_nbt::{compound::NbtCompound, deserializer::deserialize_nbt_bool, tag::NbtTag};
 use pumpkin_util::{math::vector3::Vector3, text::TextComponent};
 use serde::{Deserialize, Serialize};
 
@@ -247,25 +247,61 @@ pub trait EntityBase {
     fn id(&self) -> EntityId;
 }
 
-impl EntityPosition for NbtCompound {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct GenericEntity {
+    #[serde(skip, default = "assign_entity_id")]
+    id: EntityId,
+    pub data: NbtCompound,
+}
+
+impl EntityPosition for GenericEntity {
     fn set_pos(&mut self, pos: Vector3<f64>) {
-        todo!();
+        let conversion = [
+            NbtTag::Double(pos.x),
+            NbtTag::Double(pos.y),
+            NbtTag::Double(pos.z),
+        ];
+
+        self.data.put_list("Pos", conversion.into());
     }
 
     fn pos(&self) -> Vector3<f64> {
-        let result: Option<Vector3<f64>> = { None };
+        let extract_pos = || {
+            let raw = self.data.get_list("Pos")?;
+            #[allow(clippy::get_first)]
+            let x = raw.get(0)?.extract_double()?;
+            let y = raw.get(1)?.extract_double()?;
+            let z = raw.get(2)?.extract_double()?;
 
-        todo!();
+            Some(Vector3::new(x, y, z))
+        };
+
+        extract_pos().unwrap_or_default()
     }
 }
 
-impl EntityBase for NbtCompound {
+impl EntityBase for GenericEntity {
     fn id(&self) -> EntityId {
-        todo!();
+        self.id
     }
 
     fn uuid(&self) -> uuid::Uuid {
-        todo!();
+        let extract_uuid = || {
+            let raw = self.data.get_list("UUID")?;
+            #[allow(clippy::get_first)]
+            let hi_hi = raw.get(0)?.extract_int()?;
+            let hi_lo = raw.get(1)?.extract_int()?;
+            let lo_hi = raw.get(2)?.extract_int()?;
+            let lo_lo = raw.get(3)?.extract_int()?;
+
+            let hi = ((hi_hi as u64) << 32) | hi_lo as u64;
+            let lo = ((lo_hi as u64) << 32) | lo_lo as u64;
+
+            Some(uuid::Uuid::from_u64_pair(hi, lo))
+        };
+
+        extract_uuid().unwrap_or_default()
     }
 }
 
@@ -329,7 +365,7 @@ pub enum Entity {
 
     // Unknown
     #[serde(untagged)]
-    Generic(NbtCompound),
+    Generic(GenericEntity),
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]

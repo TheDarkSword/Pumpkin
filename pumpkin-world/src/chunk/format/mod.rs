@@ -410,6 +410,7 @@ impl ChunkEntityData {
 
     fn internal_to_bytes(&self) -> Result<Bytes, ChunkSerializingError> {
         #[derive(Serialize)]
+        #[serde(rename_all = "PascalCase")]
         struct BorrowedNbt<'a> {
             data_version: i32,
             position: [i32; 2],
@@ -605,7 +606,10 @@ struct EntityNbt {
 
 #[cfg(test)]
 mod test {
+    use std::path::PathBuf;
+
     use pumpkin_util::{global_path, math::vector2::Vector2};
+    use temp_dir::TempDir;
     use tokio::sync::mpsc;
 
     use crate::{
@@ -620,17 +624,21 @@ mod test {
 
     #[tokio::test]
     async fn test_read_entities() {
-        let path = global_path!("../../../assets/entity_test.mca");
+        let og_path = global_path!("../../../assets/entity_test.mca");
+        let dir = TempDir::new().unwrap();
+        let test_file = dir.path().join("entity_test.mca");
 
-        match AnvilChunkFile::<ChunkEntityData>::read(path).await {
-            Ok(file) => {
+        let mut zombie = None;
+        let mut drowned = None;
+
+        // Test read
+        match AnvilChunkFile::<ChunkEntityData>::read(og_path).await {
+            Ok(mut file) => {
                 let (send, mut recv) = mpsc::channel(1);
                 file.get_chunks(&[Vector2::new(-1, -1)], send).await;
 
                 match recv.recv().await.expect("We asked for a chunk") {
                     LoadedData::Loaded(mut data) => {
-                        let mut zombie = None;
-                        let mut drowned = None;
                         for (_, entity) in data.data.iter() {
                             match entity.as_ref() {
                                 Entity::Zombie(entity) => {
@@ -648,6 +656,44 @@ mod test {
                         assert_eq!(data.data.len(), 2);
 
                         data.dirty = true;
+                        file.update_chunk(&data).await.unwrap();
+                        file.write(test_file.clone()).await.unwrap();
+                    }
+                    LoadedData::Missing(pos) => panic!("Chunk {:?} does not exist", pos),
+                    LoadedData::Error((pos, err)) => panic!("Chunk {:?} failed: {:?}", pos, err),
+                }
+            }
+            Err(err) => panic!("Failed to parse entity data file: {:?}", err),
+        }
+
+        // Test write
+        match AnvilChunkFile::<ChunkEntityData>::read(test_file).await {
+            Ok(file) => {
+                let (send, mut recv) = mpsc::channel(1);
+                file.get_chunks(&[Vector2::new(-1, -1)], send).await;
+
+                let mut found_zombie = false;
+                let mut found_drowned = false;
+
+                match recv.recv().await.expect("We asked for a chunk") {
+                    LoadedData::Loaded(data) => {
+                        for (_, entity) in data.data.iter() {
+                            match entity.as_ref() {
+                                Entity::Zombie(entity) => {
+                                    assert_eq!(zombie.unwrap(), entity.uuid());
+                                    found_zombie = true;
+                                }
+                                Entity::Drowned(entity) => {
+                                    assert_eq!(drowned.unwrap(), entity.uuid());
+                                    found_drowned = true;
+                                }
+                                _ => panic!("Wrong entity type!"),
+                            }
+                        }
+
+                        assert!(found_zombie);
+                        assert!(found_drowned);
+                        assert_eq!(data.data.len(), 2);
                     }
                     LoadedData::Missing(pos) => panic!("Chunk {:?} does not exist", pos),
                     LoadedData::Error((pos, err)) => panic!("Chunk {:?} failed: {:?}", pos, err),
