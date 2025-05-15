@@ -361,22 +361,7 @@ impl NBTStorage for LivingEntity {
                 let mut effects_list = Vec::with_capacity(effects.len());
                 for effect in effects.values() {
                     let mut effect_nbt = pumpkin_nbt::compound::NbtCompound::new();
-                    effect_nbt.put(
-                        "id",
-                        NbtTag::String(effect.r#type.to_minecraft_name().to_string()),
-                    );
-                    if effect.amplifier > 0 {
-                        effect_nbt.put("amplifier", NbtTag::Int(i32::from(effect.amplifier)));
-                    }
-                    effect_nbt.put("duration", NbtTag::Int(effect.duration));
-                    if effect.ambient {
-                        effect_nbt.put("ambient", NbtTag::Byte(1));
-                    }
-                    if !effect.show_particles {
-                        effect_nbt.put("show_particles", NbtTag::Byte(0));
-                    }
-                    let show_icon: i8 = i8::from(effect.show_icon);
-                    effect_nbt.put("show_icon", NbtTag::Byte(show_icon));
+                    effect.write_nbt(&mut effect_nbt).await;
                     effects_list.push(NbtTag::Compound(effect_nbt));
                 }
                 nbt.put(
@@ -398,45 +383,9 @@ impl NBTStorage for LivingEntity {
             if let Some(nbt_effects) = nbt_effects {
                 for effect in nbt_effects {
                     if let NbtTag::Compound(effect_nbt) = effect {
-                        let Some(effect_id) = effect_nbt.get_string("id") else {
-                            log::warn!(
-                                "Unable to read effect for entity {}. Effect id is not present",
-                                self.entity.entity_id
-                            );
-                            continue;
-                        };
-                        let Some(effect_type) = EffectType::from_minecraft_name(effect_id) else {
-                            log::warn!(
-                                "Unable to read effect for entity {}. Unknown effect type: {effect_id}",
-                                self.entity.entity_id
-                            );
-                            continue;
-                        };
-                        let amplifier = effect_nbt.get_int("amplifier").unwrap_or(0);
-                        let duration = effect_nbt.get_int("duration").unwrap_or(0);
-                        if duration <= 0 {
-                            continue;
-                        }
-                        let ambient = effect_nbt.get_byte("ambient").unwrap_or(0) == 1;
-                        let show_particles =
-                            effect_nbt.get_byte("show_particles").unwrap_or(1) == 1;
-                        let Some(show_icon) = effect_nbt.get_byte("show_icon") else {
-                            log::warn!(
-                                "Unable to read effect for entity {}. Show icon is not present",
-                                self.entity.entity_id
-                            );
-                            continue;
-                        };
-                        let show_icon = show_icon == 1;
-                        let effect = Effect {
-                            r#type: effect_type,
-                            duration,
-                            amplifier: amplifier as u8,
-                            ambient,
-                            show_particles,
-                            show_icon,
-                            blend: true, // Copied from effect give command
-                        };
+                        let mut effect = Effect::default();
+                        effect.read_nbt(&mut effect_nbt.clone()).await;
+                        effect.blend = true; // TODO: change, is taken from effect give command
                         active_effects.insert(effect.r#type, effect);
                     }
                 }
