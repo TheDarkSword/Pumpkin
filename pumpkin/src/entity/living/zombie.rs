@@ -32,6 +32,7 @@ macro_rules! gen_trait {
 
             async fn damage(&self, _amount: f32, _damage_type: DamageType, _world: &World) -> bool {
                 // TODO
+                false
             }
         }
     };
