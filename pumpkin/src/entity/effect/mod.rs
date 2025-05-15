@@ -1,8 +1,8 @@
+use crate::entity::NBTStorage;
 use async_trait::async_trait;
 use pumpkin_data::entity::EffectType;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
-use crate::entity::NBTStorage;
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub struct Effect {
