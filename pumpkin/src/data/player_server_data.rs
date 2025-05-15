@@ -1,7 +1,4 @@
-use crate::{
-    entity::{NBTStorage, player::Player},
-    server::Server,
-};
+use crate::{entity::player::Player, server::Server};
 use crossbeam::atomic::AtomicCell;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_world::data::player_data::{PlayerDataError, PlayerDataStorage};

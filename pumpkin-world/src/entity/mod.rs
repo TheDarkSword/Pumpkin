@@ -233,8 +233,6 @@ mod nbt_uuid {
 /// This should only be used in level due to the need to control how positions are modified
 #[enum_dispatch]
 pub(crate) trait EntityPosition {
-    fn pos(&self) -> Vector3<f64>;
-
     fn set_pos(&mut self, pos: Vector3<f64>);
 }
 
@@ -245,6 +243,18 @@ pub trait EntityBase {
 
     /// Unique identifier for this entity. Transient.
     fn id(&self) -> EntityId;
+
+    fn pos(&self) -> Vector3<f64>;
+
+    fn set_velocity(&mut self, velocity: Vector3<f64>);
+
+    fn get_velocity(&self) -> Vector3<f64>;
+}
+
+pub trait LivingEntityBase: EntityBase {
+    fn effects_mut(&mut self) -> &mut HashMap<EffectType, EffectData>;
+
+    fn effects(&self) -> &HashMap<EffectType, EffectData>;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -264,20 +274,6 @@ impl EntityPosition for GenericEntity {
         ];
 
         self.data.put_list("Pos", conversion.into());
-    }
-
-    fn pos(&self) -> Vector3<f64> {
-        let extract_pos = || {
-            let raw = self.data.get_list("Pos")?;
-            #[allow(clippy::get_first)]
-            let x = raw.get(0)?.extract_double()?;
-            let y = raw.get(1)?.extract_double()?;
-            let z = raw.get(2)?.extract_double()?;
-
-            Some(Vector3::new(x, y, z))
-        };
-
-        extract_pos().unwrap_or_default()
     }
 }
 
@@ -302,6 +298,44 @@ impl EntityBase for GenericEntity {
         };
 
         extract_uuid().unwrap_or_default()
+    }
+
+    fn pos(&self) -> Vector3<f64> {
+        let extract_pos = || {
+            let raw = self.data.get_list("Pos")?;
+            #[allow(clippy::get_first)]
+            let x = raw.get(0)?.extract_double()?;
+            let y = raw.get(1)?.extract_double()?;
+            let z = raw.get(2)?.extract_double()?;
+
+            Some(Vector3::new(x, y, z))
+        };
+
+        extract_pos().unwrap_or_default()
+    }
+
+    fn set_velocity(&mut self, velocity: Vector3<f64>) {
+        let conversion = [
+            NbtTag::Double(velocity.x),
+            NbtTag::Double(velocity.y),
+            NbtTag::Double(velocity.z),
+        ];
+
+        self.data.put_list("Motion", conversion.into());
+    }
+
+    fn get_velocity(&self) -> Vector3<f64> {
+        let extract_motion = || {
+            let raw = self.data.get_list("Motion")?;
+            #[allow(clippy::get_first)]
+            let x = raw.get(0)?.extract_double()?;
+            let y = raw.get(1)?.extract_double()?;
+            let z = raw.get(2)?.extract_double()?;
+
+            Some(Vector3::new(x, y, z))
+        };
+
+        extract_motion().unwrap_or_default()
     }
 }
 
@@ -415,6 +449,19 @@ pub struct LivingCommon {
     // TODO: Others
 }
 
+impl LivingCommon {
+    pub fn new_player() -> Self {
+        LivingCommon {
+            absorption: Default::default(),
+            active_effects: Default::default(),
+            can_pick_up_items: true,
+            death_ticks: Default::default(),
+            fall_flying: Default::default(),
+            health: 20.0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NonPlayerCommon {
     #[serde(flatten)]
@@ -494,5 +541,28 @@ impl EntityCommon {
 
     pub fn uuid(&self) -> uuid::Uuid {
         self.uuid
+    }
+
+    pub fn new_player(uuid: uuid::Uuid) -> Self {
+        EntityCommon {
+            id: assign_entity_id(),
+            uuid,
+            air_ticks: Default::default(),
+            fall_distance: Default::default(),
+            fire_ticks: Default::default(),
+            glowing: Default::default(),
+            visual_fire: Default::default(),
+            invulnerable: Default::default(),
+            velocity: Default::default(),
+            no_gravity: Default::default(),
+            on_ground: true,
+            portal_cooldown_ticks: Default::default(),
+            pos: Default::default(),
+            rotation: Rotation {
+                yaw: Default::default(),
+                pitch: Default::default(),
+            },
+            silent: Default::default(),
+        }
     }
 }

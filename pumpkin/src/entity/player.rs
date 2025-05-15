@@ -13,9 +13,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use super::living::LivingEntity;
 use super::{
-    Entity, EntityBase, EntityId, NBTStorage,
+    Entity, EntityId, WorldEntityExt,
     combat::{self, AttackType, player_attack_sound},
     effect::Effect,
     hunger::HungerManager,
@@ -94,8 +93,9 @@ use pumpkin_util::{
     permission::PermissionLvl,
     text::TextComponent,
 };
-use pumpkin_world::entity::entity_data_flags::{
-    DATA_PLAYER_MAIN_HAND, DATA_PLAYER_MODE_CUSTOMISATION,
+use pumpkin_world::entity::{
+    EntityCommon, LivingCommon,
+    entity_data_flags::{DATA_PLAYER_MAIN_HAND, DATA_PLAYER_MODE_CUSTOMISATION},
 };
 use pumpkin_world::{cylindrical_chunk_iterator::Cylindrical, item::ItemStack, level::SyncChunk};
 use tokio::sync::RwLock;
@@ -182,7 +182,9 @@ impl ChunkManager {
 /// A `Player` is a special type of entity that represents a human player connected to the server.
 pub struct Player {
     /// The underlying living entity object that represents the player.
-    pub living_entity: LivingEntity,
+    pub living_common: LivingCommon,
+    /// The underlying common entity object that represents the player.
+    pub entity_common: EntityCommon,
     /// The player's game profile information, including their username and UUID.
     pub gameprofile: GameProfile,
     /// The client connection associated with the player.
@@ -272,13 +274,8 @@ impl Player {
         let config = client.config.lock().await.clone().unwrap_or_default();
 
         Self {
-            living_entity: LivingEntity::new(Entity::new(
-                player_uuid,
-                world,
-                Vector3::new(0.0, 0.0, 0.0),
-                EntityType::PLAYER,
-                matches!(gamemode, GameMode::Creative | GameMode::Spectator),
-            )),
+            living_common: LivingCommon::new_player(),
+            entity_common: EntityCommon::new_player(player_uuid),
             config: RwLock::new(config),
             gameprofile,
             client,
@@ -392,7 +389,7 @@ impl Player {
         //self.world().level.list_cached();
     }
 
-    pub async fn attack(&self, victim: Arc<dyn EntityBase>) {
+    pub async fn attack(&self, victim: Arc<dyn WorldEntityExt>) {
         let world = self.world().await;
         let victim_entity = victim.get_entity();
         let attacker_entity = &self.living_entity.entity;
@@ -1574,7 +1571,7 @@ impl NBTStorage for PlayerInventory {
 }
 
 #[async_trait]
-impl EntityBase for Player {
+impl WorldEntityExt for Player {
     async fn damage(&self, amount: f32, damage_type: DamageType) -> bool {
         self.world()
             .await

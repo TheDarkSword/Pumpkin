@@ -12,7 +12,7 @@ use crate::{
     PLUGIN_MANAGER,
     block::{self, registry::BlockRegistry},
     command::client_suggestions,
-    entity::{Entity, EntityBase, EntityId, player::Player},
+    entity::{Entity, EntityId, WorldEntityExt, player::Player},
     error::PumpkinError,
     plugin::{
         block::block_break::BlockBreakEvent,
@@ -151,7 +151,7 @@ pub struct World {
     pub players: Arc<RwLock<HashMap<uuid::Uuid, Arc<Player>>>>,
     /// A map of active entities within the world, keyed by their unique UUID.
     /// This does not include players.
-    pub entities: Arc<RwLock<HashMap<uuid::Uuid, Arc<dyn EntityBase>>>>,
+    pub entities: Arc<RwLock<HashMap<uuid::Uuid, Arc<dyn WorldEntityExt>>>>,
     /// The world's scoreboard, used for tracking scores, objectives, and display information.
     pub scoreboard: Mutex<Scoreboard>,
     /// The world's worldborder, defining the playable area and controlling its expansion or contraction.
@@ -1047,7 +1047,7 @@ impl World {
     }
 
     /// Gets an entity by an entity id
-    pub async fn get_entity_by_id(&self, id: EntityId) -> Option<Arc<dyn EntityBase>> {
+    pub async fn get_entity_by_id(&self, id: EntityId) -> Option<Arc<dyn WorldEntityExt>> {
         for entity in self.entities.read().await.values() {
             if entity.get_entity().entity_id == id {
                 return Some(entity.clone());
@@ -1261,7 +1261,7 @@ impl World {
     }
 
     /// Adds and Spawns an entity in the world and saves it.
-    pub async fn spawn_entity(&self, entity: Arc<dyn EntityBase>) {
+    pub async fn spawn_entity(&self, entity: Arc<dyn WorldEntityExt>) {
         let base_entity = entity.get_entity();
         self.broadcast_packet_all(&base_entity.create_spawn_packet())
             .await;

@@ -3,7 +3,6 @@ use async_trait::async_trait;
 use bytes::BufMut;
 use core::f32;
 use crossbeam::atomic::AtomicCell;
-use living::LivingEntity;
 use player::Player;
 use pumpkin_data::{
     block_properties::{Facing, HorizontalFacing},
@@ -28,6 +27,7 @@ use pumpkin_util::math::{
     vector3::Vector3,
     wrap_degrees,
 };
+use pumpkin_world::entity::{Entity, EntityBase};
 use serde::Serialize;
 use std::{
     collections::HashMap,
@@ -51,7 +51,7 @@ pub mod experience_orb;
 pub mod hunger;
 pub mod item;
 pub mod living;
-pub mod mob;
+pub mod non_living;
 pub mod player;
 pub mod projectile;
 pub mod tnt;
@@ -62,427 +62,19 @@ mod combat;
 pub type EntityId = i32;
 
 #[async_trait]
-pub trait EntityBase: Send + Sync {
+pub trait WorldEntityExt: EntityBase {
     /// Gets Called every tick
-    async fn tick(&self, server: &Server) {
-        if let Some(living) = self.get_living_entity() {
-            living.tick(server).await;
-        } else {
-            self.get_entity().tick(server).await;
-        }
-    }
+    async fn tick(&mut self, world: &World);
 
     /// Returns if damage was successful or not
-    async fn damage(&self, amount: f32, damage_type: DamageType) -> bool {
-        if let Some(living) = self.get_living_entity() {
-            living.damage(amount, damage_type).await
-        } else {
-            self.get_entity().damage(amount, damage_type).await
-        }
-    }
+    async fn damage(&self, amount: f32, damage_type: DamageType, world: &World) -> bool;
 
-    async fn init_data_tracker(&self) {}
-
-    async fn write_nbt(&self, _nbt: &mut NbtCompound) {}
-
-    async fn read_nbt(&self, _nbt: &NbtCompound) {}
+    async fn init_data_tracker(&self, world: &World);
 
     /// Called when a player collides with a entity
-    async fn on_player_collision(&self, _player: Arc<Player>) {}
-    fn get_entity(&self) -> &Entity;
-    fn get_living_entity(&self) -> Option<&LivingEntity>;
-}
+    async fn on_player_collision(&self, player: Arc<Player>, world: &World);
 
-static CURRENT_ID: AtomicI32 = AtomicI32::new(0);
-
-/// Represents a non-living Entity (e.g. Item, Egg, Snowball...)
-pub struct Entity {
-    /// A unique identifier for the entity
-    pub entity_id: EntityId,
-    /// A persistent, unique identifier for the entity
-    pub entity_uuid: uuid::Uuid,
-    /// The type of entity (e.g., player, zombie, item)
-    pub entity_type: EntityType,
-    /// The world in which the entity exists.
-    pub world: Arc<RwLock<Arc<World>>>,
-    /// The entity's current position in the world
-    pub pos: AtomicCell<Vector3<f64>>,
-    /// The entity's position rounded to the nearest block coordinates
-    pub block_pos: AtomicCell<BlockPos>,
-    /// The chunk coordinates of the entity's current position
-    pub chunk_pos: AtomicCell<Vector2<i32>>,
-    /// Indicates whether the entity is sneaking
-    pub sneaking: AtomicBool,
-    /// Indicates whether the entity is sprinting
-    pub sprinting: AtomicBool,
-    /// Indicates whether the entity is flying due to a fall
-    pub fall_flying: AtomicBool,
-    /// The entity's current velocity vector, aka knockback
-    pub velocity: AtomicCell<Vector3<f64>>,
-    /// Indicates whether the entity is on the ground (may not always be accurate).
-    pub on_ground: AtomicBool,
-    /// The entity's yaw rotation (horizontal rotation) ← →
-    pub yaw: AtomicCell<f32>,
-    /// The entity's head yaw rotation (horizontal rotation of the head)
-    pub head_yaw: AtomicCell<f32>,
-    /// The entity's pitch rotation (vertical rotation) ↑ ↓
-    pub pitch: AtomicCell<f32>,
-    /// The height of the entity's eyes from the ground.
-    pub standing_eye_height: f32,
-    /// The entity's current pose (e.g., standing, sitting, swimming).
-    pub pose: AtomicCell<EntityPose>,
-    /// The bounding box of an entity (hitbox)
-    pub bounding_box: AtomicCell<BoundingBox>,
-    ///The size (width and height) of the bounding box
-    pub bounding_box_size: AtomicCell<EntityDimensions>,
-    /// Whether this entity is invulnerable to all damage
-    pub invulnerable: AtomicBool,
-    /// List of damage types this entity is immune to
-    pub damage_immunities: Vec<DamageType>,
-}
-
-impl Entity {
-    pub fn new(
-        entity_uuid: uuid::Uuid,
-        world: Arc<World>,
-        position: Vector3<f64>,
-        entity_type: EntityType,
-        invulnerable: bool,
-    ) -> Self {
-        let floor_x = position.x.floor() as i32;
-        let floor_y = position.y.floor() as i32;
-        let floor_z = position.z.floor() as i32;
-
-        let bounding_box_size = EntityDimensions {
-            width: entity_type.dimension[0],
-            height: entity_type.dimension[1],
-        };
-
-        Self {
-            entity_id: CURRENT_ID.fetch_add(1, Relaxed),
-            entity_uuid,
-            entity_type,
-            on_ground: AtomicBool::new(false),
-            pos: AtomicCell::new(position),
-            block_pos: AtomicCell::new(BlockPos(Vector3::new(floor_x, floor_y, floor_z))),
-            chunk_pos: AtomicCell::new(Vector2::new(floor_x, floor_z)),
-            sneaking: AtomicBool::new(false),
-            world: Arc::new(RwLock::new(world)),
-            sprinting: AtomicBool::new(false),
-            fall_flying: AtomicBool::new(false),
-            yaw: AtomicCell::new(0.0),
-            head_yaw: AtomicCell::new(0.0),
-            pitch: AtomicCell::new(0.0),
-            velocity: AtomicCell::new(Vector3::new(0.0, 0.0, 0.0)),
-            standing_eye_height: entity_type.eye_height,
-            pose: AtomicCell::new(EntityPose::Standing),
-            bounding_box: AtomicCell::new(BoundingBox::new_from_pos(
-                position.x,
-                position.y,
-                position.z,
-                &bounding_box_size,
-            )),
-            bounding_box_size: AtomicCell::new(bounding_box_size),
-            invulnerable: AtomicBool::new(invulnerable),
-            damage_immunities: Vec::new(),
-        }
-    }
-
-    pub async fn from_data(
-        data: &HashMap<Uuid, NbtCompound>,
-        world: Arc<World>,
-    ) -> Vec<Arc<dyn EntityBase>> {
-        let mut entities = Vec::with_capacity(data.len());
-        for (uuid, entity_data) in data {
-            let Some(id) = entity_data.get_string("id") else {
-                continue;
-            };
-            // ID was found but no entity has this id, could be because it was saved using an older/newer version
-            let Some(entity_type) = EntityType::from_name(&id.replace("minecraft:", "")) else {
-                continue;
-            };
-            // The 128-bit UUID is stored as four 32-bit integers ([Int] Ints), ordered from most to least significant.
-
-            let position = entity_data.get_list("Pos").unwrap();
-            let x = position[0].extract_double().unwrap_or(0.0);
-            let y = position[1].extract_double().unwrap_or(0.0);
-            let z = position[2].extract_double().unwrap_or(0.0);
-            let invulnerable = entity_data.get_bool("Invulnerable").unwrap_or(false);
-            let entity = entity_base_from_type(
-                entity_type,
-                *uuid,
-                world.clone(),
-                Vector3::new(x, y, z),
-                invulnerable,
-            )
-            .await;
-            entity.read_nbt(entity_data).await;
-            entities.push(entity);
-        }
-        entities
-    }
-
-    pub async fn set_velocity(&self, velocity: Vector3<f64>) {
-        self.velocity.store(velocity);
-        self.world
-            .read()
-            .await
-            .broadcast_packet_all(&CEntityVelocity::new(self.entity_id.into(), velocity))
-            .await;
-    }
-
-    /// Updates the entity's position, block position, and chunk position.
-    ///
-    /// This function calculates the new position, block position, and chunk position based on the provided coordinates. If any of these values change, the corresponding fields are updated.
-    pub fn set_pos(&self, new_position: Vector3<f64>) {
-        let pos = self.pos.load();
-        if pos != new_position {
-            self.pos.store(new_position);
-            self.bounding_box.store(BoundingBox::new_from_pos(
-                new_position.x,
-                new_position.y,
-                new_position.z,
-                &self.bounding_box_size.load(),
-            ));
-
-            let floor_x = new_position.x.floor() as i32;
-            let floor_y = new_position.y.floor() as i32;
-            let floor_z = new_position.z.floor() as i32;
-
-            let block_pos = self.block_pos.load();
-            let block_pos_vec = block_pos.0;
-            if floor_x != block_pos_vec.x
-                || floor_y != block_pos_vec.y
-                || floor_z != block_pos_vec.z
-            {
-                let new_block_pos = Vector3::new(floor_x, floor_y, floor_z);
-                self.block_pos.store(BlockPos(new_block_pos));
-
-                let chunk_pos = self.chunk_pos.load();
-                if get_section_cord(floor_x) != chunk_pos.x
-                    || get_section_cord(floor_z) != chunk_pos.z
-                {
-                    self.chunk_pos.store(Vector2::new(
-                        get_section_cord(new_block_pos.x),
-                        get_section_cord(new_block_pos.z),
-                    ));
-                }
-            }
-        }
-    }
-
-    /// Returns entity rotation as vector
-    pub fn rotation(&self) -> Vector3<f32> {
-        // Convert degrees to radians if necessary
-        let yaw_rad = self.yaw.load().to_radians();
-        let pitch_rad = self.pitch.load().to_radians();
-
-        Vector3::new(
-            yaw_rad.cos() * pitch_rad.cos(),
-            pitch_rad.sin(),
-            yaw_rad.sin() * pitch_rad.cos(),
-        )
-        .normalize()
-    }
-
-    /// Changes this entity's pitch and yaw to look at target
-    pub async fn look_at(&self, target: Vector3<f64>) {
-        let position = self.pos.load();
-        let delta = target.sub(&position);
-        let root = delta.x.hypot(delta.z);
-        let pitch = wrap_degrees(-delta.y.atan2(root) as f32 * 180.0 / f32::consts::PI);
-        let yaw = wrap_degrees((delta.z.atan2(delta.x) as f32 * 180.0 / f32::consts::PI) - 90.0);
-        self.pitch.store(pitch);
-        self.yaw.store(yaw);
-
-        // Broadcast the update packet.
-        // TODO: Do caching to only send the packet when needed.
-        let yaw = (yaw * 256.0 / 360.0).rem_euclid(256.0);
-        let pitch = (pitch * 256.0 / 360.0).rem_euclid(256.0);
-        self.world
-            .read()
-            .await
-            .broadcast_packet_all(&CUpdateEntityRot::new(
-                self.entity_id.into(),
-                yaw as u8,
-                pitch as u8,
-                self.on_ground.load(Relaxed),
-            ))
-            .await;
-        self.world
-            .read()
-            .await
-            .broadcast_packet_all(&CHeadRot::new(self.entity_id.into(), yaw as u8))
-            .await;
-    }
-
-    pub async fn teleport(&self, position: Vector3<f64>, yaw: f32, pitch: f32) {
-        self.world
-            .read()
-            .await
-            .broadcast_packet_all(&CEntityPositionSync::new(
-                self.entity_id.into(),
-                position,
-                Vector3::new(0.0, 0.0, 0.0),
-                yaw,
-                pitch,
-                // TODO
-                self.on_ground.load(SeqCst),
-            ))
-            .await;
-        self.set_pos(position);
-        self.set_rotation(yaw, pitch);
-    }
-
-    /// Sets the `Entity` yaw & pitch rotation
-    pub fn set_rotation(&self, yaw: f32, pitch: f32) {
-        // TODO
-        self.yaw.store(yaw);
-        self.pitch.store(pitch.clamp(-90.0, 90.0) % 360.0);
-    }
-
-    /// Removes the `Entity` from their current `World`
-    ///
-    /// NOTE: If you want to remove multiple entities at Once, Use `World::remove_entities` as it is more efficient
-    pub async fn remove(&self) {
-        self.world.read().await.remove_entity(self).await;
-    }
-
-    pub fn create_spawn_packet(&self) -> CSpawnEntity {
-        let entity_loc = self.pos.load();
-        let entity_vel = self.velocity.load();
-        CSpawnEntity::new(
-            VarInt(self.entity_id),
-            self.entity_uuid,
-            VarInt(i32::from(self.entity_type.id)),
-            entity_loc,
-            self.pitch.load(),
-            self.yaw.load(),
-            self.head_yaw.load(), // todo: head_yaw and yaw are swapped, find out why
-            0.into(),
-            entity_vel,
-        )
-    }
-    pub fn width(&self) -> f32 {
-        self.bounding_box_size.load().width
-    }
-
-    pub fn height(&self) -> f32 {
-        self.bounding_box_size.load().height
-    }
-
-    /// Applies knockback to the entity, following vanilla Minecraft's mechanics.
-    ///
-    /// This function calculates the entity's new velocity based on the specified knockback strength and direction.
-    pub fn knockback(&self, strength: f64, x: f64, z: f64) {
-        // This has some vanilla magic
-        let mut x = x;
-        let mut z = z;
-        while x.mul_add(x, z * z) < 1.0E-5 {
-            x = (rand::random::<f64>() - rand::random::<f64>()) * 0.01;
-            z = (rand::random::<f64>() - rand::random::<f64>()) * 0.01;
-        }
-
-        let var8 = Vector3::new(x, 0.0, z).normalize() * strength;
-        let velocity = self.velocity.load();
-        self.velocity.store(Vector3::new(
-            velocity.x / 2.0 - var8.x,
-            if self.on_ground.load(Relaxed) {
-                (velocity.y / 2.0 + strength).min(0.4)
-            } else {
-                velocity.y
-            },
-            velocity.z / 2.0 - var8.z,
-        ));
-    }
-
-    pub async fn set_sneaking(&self, sneaking: bool) {
-        assert!(self.sneaking.load(Relaxed) != sneaking);
-        self.sneaking.store(sneaking, Relaxed);
-        self.set_flag(Flag::Sneaking, sneaking).await;
-        if sneaking {
-            self.set_pose(EntityPose::Crouching).await;
-        } else {
-            self.set_pose(EntityPose::Standing).await;
-        }
-    }
-
-    pub fn get_horizontal_facing(&self) -> HorizontalFacing {
-        let adjusted_yaw = (self.yaw.load() % 360.0 + 360.0) % 360.0; // Normalize yaw to [0, 360)
-
-        match adjusted_yaw {
-            0.0..=45.0 | 315.0..=360.0 => HorizontalFacing::South,
-            45.0..=135.0 => HorizontalFacing::West,
-            135.0..=225.0 => HorizontalFacing::North,
-            225.0..=315.0 => HorizontalFacing::East,
-            _ => HorizontalFacing::South, // Default case, should not occur
-        }
-    }
-
-    pub fn get_facing(&self) -> Facing {
-        let pitch = self.pitch.load().to_radians();
-        let yaw = -self.yaw.load().to_radians();
-
-        let (sin_p, cos_p) = pitch.sin_cos();
-        let (sin_y, cos_y) = yaw.sin_cos();
-
-        let x = sin_y * cos_p;
-        let y = -sin_p;
-        let z = cos_y * cos_p;
-
-        let ax = x.abs();
-        let ay = y.abs();
-        let az = z.abs();
-
-        if ax > ay && ax > az {
-            if x > 0.0 { Facing::East } else { Facing::West }
-        } else if ay > ax && ay > az {
-            if y > 0.0 { Facing::Up } else { Facing::Down }
-        } else if z > 0.0 {
-            Facing::South
-        } else {
-            Facing::North
-        }
-    }
-
-    pub async fn set_sprinting(&self, sprinting: bool) {
-        assert!(self.sprinting.load(Relaxed) != sprinting);
-        self.sprinting.store(sprinting, Relaxed);
-        self.set_flag(Flag::Sprinting, sprinting).await;
-    }
-
-    pub fn check_fall_flying(&self) -> bool {
-        !self.on_ground.load(Relaxed)
-    }
-
-    pub async fn set_fall_flying(&self, fall_flying: bool) {
-        assert!(self.fall_flying.load(Relaxed) != fall_flying);
-        self.fall_flying.store(fall_flying, Relaxed);
-        self.set_flag(Flag::FallFlying, fall_flying).await;
-    }
-
-    async fn set_flag(&self, flag: Flag, value: bool) {
-        let index = flag as u8;
-        let mut b = 0i8;
-        if value {
-            b |= 1 << index;
-        } else {
-            b &= !(1 << index);
-        }
-        self.send_meta_data(&[Metadata::new(0, MetaDataType::Byte, b)])
-            .await;
-    }
-
-    /// Plays sound at this entity's position with the entity's sound category
-    pub async fn play_sound(&self, sound: Sound) {
-        self.world
-            .read()
-            .await
-            .play_sound(sound, SoundCategory::Neutral, &self.pos.load())
-            .await;
-    }
-
-    pub async fn send_meta_data<T>(&self, meta: &[Metadata<T>])
+    async fn send_meta_data<T>(&self, meta: &[Metadata<T>], world: &World)
     where
         T: Serialize,
     {
@@ -495,135 +87,27 @@ impl Entity {
         }
         buf.put_u8(255);
         // TODO: don't broadcast to all
-        self.world
-            .read()
+        world
+            .broadcast_packet_all(&CSetEntityMetadata::new(self.id().into(), buf.into()))
+            .await;
+    }
+
+    async fn global_tick(&mut self, world: &World) {
+        // Movement
+        let velocity = self.get_velocity();
+        let pos = self.pos();
+
+        world
+            .level
+            .entity_manager
+            .write()
             .await
-            .broadcast_packet_all(&CSetEntityMetadata::new(self.entity_id.into(), buf.into()))
+            .set_position(self, pos + velocity)
             .await;
+        // TODO: Update velocity
+
+        self.tick(world).await;
     }
-
-    pub async fn set_pose(&self, pose: EntityPose) {
-        self.pose.store(pose);
-        let pose = pose as i32;
-        self.send_meta_data(&[Metadata::new(6, MetaDataType::EntityPose, VarInt(pose))])
-            .await;
-    }
-
-    pub fn is_invulnerable_to(&self, damage_type: &DamageType) -> bool {
-        self.invulnerable.load(Relaxed) || self.damage_immunities.contains(damage_type)
-    }
-
-    fn velocity_multiplier(_pos: Vector3<f64>) -> f32 {
-        // let world = self.world.read().await;
-        // TODO: handle when player is outside world
-        // let block = world.get_block(&self.block_pos.load()).await;
-        // block.velocity_multiplier
-        1.0
-        // if velo_multiplier == 1.0 {
-        //     const VELOCITY_OFFSET: f64 = 0.500001; // Vanilla
-        //     let pos_with_y_offset = BlockPos(Vector3::new(
-        //         pos.x.floor() as i32,
-        //         (pos.y - VELOCITY_OFFSET).floor() as i32,
-        //         pos.z.floor() as i32,
-        //     ));
-        //     let block = world.get_block(&pos_with_y_offset).await.unwrap();
-        //     block.velocity_multiplier
-        // } else {
-        // }
-    }
-}
-
-#[async_trait]
-impl EntityBase for Entity {
-    async fn damage(&self, _amount: f32, _damage_type: DamageType) -> bool {
-        false
-    }
-
-    async fn write_nbt(&self, nbt: &mut NbtCompound) {
-        // This is the most important, keep this on top
-        nbt.put_string(
-            "id",
-            format!("minecraft:{}", self.entity_type.resource_name),
-        );
-        let position = self.pos.load();
-        nbt.put(
-            "Pos",
-            NbtTag::List(
-                vec![position.x.into(), position.y.into(), position.z.into()].into_boxed_slice(),
-            ),
-        );
-        let velocity = self.velocity.load();
-        nbt.put(
-            "Motion",
-            NbtTag::List(
-                vec![velocity.x.into(), velocity.y.into(), velocity.z.into()].into_boxed_slice(),
-            ),
-        );
-        nbt.put(
-            "Rotation",
-            NbtTag::List(vec![self.yaw.load().into(), self.pitch.load().into()].into_boxed_slice()),
-        );
-        let uuid_bytes = self.entity_uuid.as_bytes();
-        let uuid1 =
-            i32::from_be_bytes([uuid_bytes[0], uuid_bytes[1], uuid_bytes[2], uuid_bytes[3]]);
-        let uuid2 =
-            i32::from_be_bytes([uuid_bytes[4], uuid_bytes[5], uuid_bytes[6], uuid_bytes[7]]);
-        let uuid3 =
-            i32::from_be_bytes([uuid_bytes[8], uuid_bytes[9], uuid_bytes[10], uuid_bytes[11]]);
-        let uuid4 = i32::from_be_bytes([
-            uuid_bytes[12],
-            uuid_bytes[13],
-            uuid_bytes[14],
-            uuid_bytes[15],
-        ]);
-        nbt.put(
-            "UUID",
-            NbtTag::IntArray(vec![uuid1, uuid2, uuid3, uuid4].into_boxed_slice()),
-        );
-        nbt.put_bool("OnGround", self.on_ground.load(Relaxed));
-
-        // todo more...
-    }
-
-    async fn read_nbt(&self, nbt: &NbtCompound) {
-        let position = nbt.get_list("Pos").unwrap();
-        let x = position[0].extract_double().unwrap_or(0.0);
-        let y = position[1].extract_double().unwrap_or(0.0);
-        let z = position[2].extract_double().unwrap_or(0.0);
-        self.set_pos(Vector3::new(x, y, z));
-        let velocity = nbt.get_list("Motion").unwrap();
-        let x = velocity[0].extract_double().unwrap_or(0.0);
-        let y = velocity[1].extract_double().unwrap_or(0.0);
-        let z = velocity[2].extract_double().unwrap_or(0.0);
-        self.velocity.store(Vector3::new(x, y, z));
-        let rotation = nbt.get_list("Rotation").unwrap();
-        let yaw = rotation[0].extract_float().unwrap_or(0.0);
-        let pitch = rotation[1].extract_float().unwrap_or(0.0);
-        self.set_rotation(yaw, pitch);
-        self.head_yaw.store(yaw);
-        self.on_ground
-            .store(nbt.get_bool("OnGround").unwrap_or(false), Relaxed);
-        // todo more...
-    }
-
-    async fn tick(&self, _: &Server) {
-        //Todo! Tick
-    }
-
-    fn get_entity(&self) -> &Entity {
-        self
-    }
-
-    fn get_living_entity(&self) -> Option<&LivingEntity> {
-        None
-    }
-}
-
-#[async_trait]
-pub trait NBTStorage: Send + Sync {
-    async fn write_nbt(&self, nbt: &mut NbtCompound);
-
-    async fn read_nbt(&mut self, nbt: &NbtCompound);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

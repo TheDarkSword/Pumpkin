@@ -65,6 +65,36 @@ impl EntityManager {
         }
     }
 
+    pub async fn iter_entities<F>(&self, mut f: F)
+    where
+        F: AsyncFnMut(&Entity),
+    {
+        for chunk in self.by_chunk.values() {
+            let chunk = chunk.read().await;
+            for entity in chunk.data.values() {
+                f(entity).await;
+            }
+        }
+    }
+
+    pub async fn iter_entities_mut<F>(&self, mut f: F)
+    where
+        F: AsyncFnMut(&mut Entity),
+    {
+        for chunk in self.by_chunk.values() {
+            let mut chunk = chunk.write().await;
+
+            if !chunk.data.is_empty() {
+                // Assume we are mutating the entities
+                chunk.dirty = true;
+            }
+
+            for entity in chunk.data.values_mut() {
+                f(entity).await;
+            }
+        }
+    }
+
     pub async fn write_chunks(&self, chunks_to_write: Vec<(Vector2<i32>, SyncEntityChunk)>) {
         trace!(
             "Sending entity chunks to ChunkIO {:}",

@@ -24,10 +24,6 @@ macro_rules! auto_struct {
 macro_rules! auto_trait {
     ($s:ident) => {
         impl EntityPosition for $s {
-            fn pos(&self) -> Vector3<f64> {
-                self.0.mob_common.non_player_common.common.pos
-            }
-
             fn set_pos(&mut self, pos: Vector3<f64>) {
                 self.0.mob_common.non_player_common.common.pos = pos;
             }
@@ -40,6 +36,18 @@ macro_rules! auto_trait {
 
             fn id(&self) -> EntityId {
                 self.0.mob_common.non_player_common.common.id()
+            }
+
+            fn pos(&self) -> Vector3<f64> {
+                self.0.mob_common.non_player_common.common.pos
+            }
+
+            fn set_velocity(&mut self, velocity: Vector3<f64>) {
+                self.0.mob_common.non_player_common.common.velocity = velocity;
+            }
+
+            fn get_velocity(&self) -> Vector3<f64> {
+                self.0.mob_common.non_player_common.common.velocity
             }
         }
     };

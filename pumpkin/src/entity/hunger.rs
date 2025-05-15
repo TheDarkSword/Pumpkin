@@ -1,4 +1,4 @@
-use super::{EntityBase, NBTStorage, player::Player};
+use super::{NBTStorage, WorldEntityExt, player::Player};
 use async_trait::async_trait;
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::damage::DamageType;

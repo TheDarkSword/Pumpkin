@@ -18,10 +18,6 @@ pub struct ExpOrb {
 }
 
 impl EntityPosition for ExpOrb {
-    fn pos(&self) -> Vector3<f64> {
-        self.common.common.pos
-    }
-
     fn set_pos(&mut self, pos: Vector3<f64>) {
         self.common.common.pos = pos;
     }
@@ -34,5 +30,17 @@ impl EntityBase for ExpOrb {
 
     fn id(&self) -> EntityId {
         self.common.common.id()
+    }
+
+    fn pos(&self) -> Vector3<f64> {
+        self.common.common.pos
+    }
+
+    fn set_velocity(&mut self, velocity: Vector3<f64>) {
+        self.common.common.velocity = velocity;
+    }
+
+    fn get_velocity(&self) -> Vector3<f64> {
+        self.common.common.velocity
     }
 }

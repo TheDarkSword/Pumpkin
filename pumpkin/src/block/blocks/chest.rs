@@ -21,7 +21,7 @@ use pumpkin_world::block::BlockDirection;
 use pumpkin_world::block::entities::chest::ChestBlockEntity;
 
 use crate::block::BlockIsReplacing;
-use crate::entity::EntityBase;
+use crate::entity::WorldEntityExt;
 use crate::world::{BlockFlags, World};
 use crate::{
     block::{pumpkin_block::PumpkinBlock, registry::BlockActionResult},
