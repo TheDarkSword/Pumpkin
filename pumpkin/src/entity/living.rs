@@ -383,8 +383,12 @@ impl NBTStorage for LivingEntity {
             if let Some(nbt_effects) = nbt_effects {
                 for effect in nbt_effects {
                     if let NbtTag::Compound(effect_nbt) = effect {
-                        let mut effect = Effect::default();
-                        effect.read_nbt(&mut effect_nbt.clone()).await;
+                        let effect = Effect::create_from_nbt(&mut effect_nbt.clone()).await;
+                        if effect.is_none() {
+                            log::warn!("Unable to read effect from nbt");
+                            continue;
+                        }
+                        let mut effect = effect.unwrap();
                         effect.blend = true; // TODO: change, is taken from effect give command
                         active_effects.insert(effect.r#type, effect);
                     }
