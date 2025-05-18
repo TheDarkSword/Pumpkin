@@ -1,7 +1,8 @@
 use crate::block::registry::BlockActionResult;
+use crate::entity::EntityBase;
 use crate::entity::player::Player;
 use crate::server::Server;
-use crate::world::{BlockFlags, World};
+use crate::world::World;
 use async_trait::async_trait;
 use pumpkin_data::item::Item;
 use pumpkin_data::{Block, BlockState};
@@ -9,6 +10,7 @@ use pumpkin_protocol::server::play::SUseItemOn;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::BlockStateId;
 use pumpkin_world::block::BlockDirection;
+use pumpkin_world::world::BlockFlags;
 use std::sync::Arc;
 
 use super::BlockIsReplacing;
@@ -36,12 +38,6 @@ pub trait PumpkinBlock: Send + Sync {
     ) {
     }
 
-    fn should_drop_items_on_explosion(&self) -> bool {
-        true
-    }
-
-    async fn explode(&self, _block: &Block, _world: &Arc<World>, _location: BlockPos) {}
-
     async fn use_with_item(
         &self,
         _block: &Block,
@@ -52,6 +48,37 @@ pub trait PumpkinBlock: Send + Sync {
         _world: &Arc<World>,
     ) -> BlockActionResult {
         BlockActionResult::Continue
+    }
+
+    async fn on_entity_collision(
+        &self,
+        _world: &Arc<World>,
+        _entity: &dyn EntityBase,
+        _pos: BlockPos,
+        _block: Block,
+        _state: BlockState,
+        _server: &Server,
+    ) {
+    }
+
+    fn should_drop_items_on_explosion(&self) -> bool {
+        true
+    }
+
+    async fn explode(&self, _block: &Block, _world: &Arc<World>, _location: BlockPos) {}
+
+    /// Handles the block event, which is an event specific to a block with an integer ID and data.
+    ///
+    /// returns whether the event was handled successfully
+    async fn on_synced_block_event(
+        &self,
+        _block: &Block,
+        _world: &Arc<World>,
+        _pos: &BlockPos,
+        _type: u8,
+        _data: u8,
+    ) -> bool {
+        false
     }
 
     #[allow(clippy::too_many_arguments)]

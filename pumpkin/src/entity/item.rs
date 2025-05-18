@@ -59,22 +59,13 @@ impl ItemEntity {
             pickup_delay: Mutex::new(pickup_delay), // Vanilla pickup delay is 10 ticks
         }
     }
-    pub async fn send_meta_packet(&self) {
-        self.entity
-            .send_meta_data(&[Metadata::new(
-                8,
-                MetaDataType::ItemStack,
-                &ItemStackSerializer::from(*self.item_stack.lock().await),
-            )])
-            .await;
-    }
 }
 
 #[async_trait]
 impl EntityBase for ItemEntity {
-    async fn tick(&self, server: &Server) {
+    async fn tick(&self, caller: Arc<dyn EntityBase>, server: &Server) {
         let entity = &self.entity;
-        entity.tick(server).await;
+        entity.tick(caller, server).await;
         {
             let mut delay = self.pickup_delay.lock().await;
             *delay = delay.saturating_sub(1);
@@ -86,11 +77,21 @@ impl EntityBase for ItemEntity {
         }
     }
 
+    async fn init_data_tracker(&self) {
+        self.entity
+            .send_meta_data(&[Metadata::new(
+                8,
+                MetaDataType::ItemStack,
+                &ItemStackSerializer::from(*self.item_stack.lock().await),
+            )])
+            .await;
+    }
+
     async fn damage(&self, _amount: f32, _damage_type: DamageType) -> bool {
         false
     }
 
-    async fn on_player_collision(&self, player: Arc<Player>) {
+    async fn on_player_collision(&self, player: &Arc<Player>) {
         let can_pickup = {
             let delay = self.pickup_delay.lock().await;
             *delay == 0
@@ -123,7 +124,7 @@ impl EntityBase for ItemEntity {
                 self.entity.remove().await;
             } else {
                 // Update entity
-                self.send_meta_packet().await;
+                self.init_data_tracker().await;
             }
         }
     }

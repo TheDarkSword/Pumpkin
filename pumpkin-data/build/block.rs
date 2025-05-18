@@ -355,12 +355,35 @@ impl ToTokens for CollisionShape {
 pub struct BlockState {
     pub id: u16,
     pub state_flags: u8,
+    pub instrument: String, // TODO: make this an enum
     pub luminance: u8,
+    pub piston_behavior: PistonBehavior,
     pub hardness: f32,
     pub collision_shapes: Vec<u16>,
     pub opacity: Option<u8>,
     pub block_entity_type: Option<u16>,
-    // pub instrument: String, // TODO: make this an enum
+}
+
+#[derive(Deserialize, Clone, Debug)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum PistonBehavior {
+    Normal,
+    Destroy,
+    Block,
+    Ignore,
+    PushOnly,
+}
+
+impl PistonBehavior {
+    fn to_tokens(&self) -> TokenStream {
+        match self {
+            PistonBehavior::Normal => quote! { PistonBehavior::Normal },
+            PistonBehavior::Destroy => quote! { PistonBehavior::Destroy },
+            PistonBehavior::Block => quote! { PistonBehavior::Block },
+            PistonBehavior::Ignore => quote! { PistonBehavior::Ignore },
+            PistonBehavior::PushOnly => quote! { PistonBehavior::PushOnly },
+        }
+    }
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -374,6 +397,7 @@ impl BlockState {
         let mut tokens = TokenStream::new();
         let id = LitInt::new(&self.id.to_string(), Span::call_site());
         let state_flags = LitInt::new(&self.state_flags.to_string(), Span::call_site());
+        let instrument = self.instrument.clone();
         let luminance = LitInt::new(&self.luminance.to_string(), Span::call_site());
         let hardness = self.hardness;
         let opacity = match self.opacity {
@@ -396,12 +420,15 @@ impl BlockState {
             .collision_shapes
             .iter()
             .map(|shape_id| LitInt::new(&shape_id.to_string(), Span::call_site()));
+        let piston_behavior = &self.piston_behavior.to_tokens();
 
         tokens.extend(quote! {
             BlockState {
                 id: #id,
                 state_flags: #state_flags,
+                instrument: #instrument,
                 luminance: #luminance,
+                piston_behavior: #piston_behavior,
                 hardness: #hardness,
                 collision_shapes: &[#(#collision_shapes),*],
                 opacity: #opacity,
@@ -1268,6 +1295,7 @@ pub(crate) fn build() -> TokenStream {
 
     quote! {
         use crate::{BlockState, BlockStateRef, Block, CollisionShape};
+        use crate::block_state::PistonBehavior;
         use pumpkin_util::math::int_provider::{UniformIntProvider, IntProvider, NormalIntProvider};
         use pumpkin_util::loot_table::*;
         use pumpkin_util::math::experience::Experience;

@@ -1,4 +1,3 @@
-use std::hash::Hash;
 use std::{
     collections::HashMap,
     sync::{Arc, atomic::Ordering},
@@ -9,6 +8,7 @@ pub mod explosion;
 pub mod portal;
 pub mod time;
 
+use crate::block::BlockEvent;
 use crate::{
     PLUGIN_MANAGER,
     block::{self, registry::BlockRegistry},
@@ -22,7 +22,7 @@ use crate::{
     },
     server::Server,
 };
-use bitflags::bitflags;
+use async_trait::async_trait;
 use border::Worldborder;
 use bytes::{BufMut, Bytes};
 use explosion::Explosion;
@@ -41,9 +41,9 @@ use pumpkin_data::{
     world::{RAW, WorldEvent},
 };
 use pumpkin_macros::send_cancellable;
-use pumpkin_nbt::to_bytes_unnamed;
+use pumpkin_nbt::{compound::NbtCompound, to_bytes_unnamed};
 use pumpkin_protocol::client::play::{
-    CRemoveMobEffect, CSetEntityMetadata, MetaDataType, Metadata,
+    CBlockEvent, CRemoveMobEffect, CSetEntityMetadata, MetaDataType, Metadata,
 };
 use pumpkin_protocol::codec::identifier::Identifier;
 use pumpkin_protocol::ser::serializer::Serializer;
@@ -64,22 +64,23 @@ use pumpkin_protocol::{
     codec::var_int::VarInt,
 };
 use pumpkin_registry::DimensionType;
-use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
+use pumpkin_util::math::{boundingbox::BoundingBox, position::BlockPos, vector3::Vector3};
 use pumpkin_util::math::{position::chunk_section_from_pos, vector2::Vector2};
 use pumpkin_util::text::{TextComponent, color::NamedColor};
-use pumpkin_world::entity::entity_data_flags::{
-    DATA_PLAYER_MAIN_HAND, DATA_PLAYER_MODE_CUSTOMISATION,
-};
 use pumpkin_world::{
     BlockStateId, GENERATION_SETTINGS, GeneratorSetting, biome, block::entities::BlockEntity,
     level::SyncChunk,
 };
 use pumpkin_world::{block::BlockDirection, chunk::ChunkData};
 use pumpkin_world::{chunk::TickPriority, level::Level};
+use pumpkin_world::{
+    entity::entity_data_flags::{DATA_PLAYER_MAIN_HAND, DATA_PLAYER_MODE_CUSTOMISATION},
+    world::GetBlockError,
+};
+use pumpkin_world::{world::BlockFlags, world_info::LevelData};
 use rand::{Rng, thread_rng};
 use scoreboard::Scoreboard;
 use serde::Serialize;
-use thiserror::Error;
 use time::LevelTime;
 use tokio::sync::{RwLock, mpsc};
 use tokio::{
@@ -94,33 +95,6 @@ pub mod scoreboard;
 pub mod weather;
 
 use weather::Weather;
-
-bitflags! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-    pub struct BlockFlags: u32 {
-        const NOTIFY_NEIGHBORS                      = 0b000_0000_0001;
-        const NOTIFY_LISTENERS                      = 0b000_0000_0010;
-        const NOTIFY_ALL                            = 0b000_0000_0011;
-        const FORCE_STATE                           = 0b000_0000_0100;
-        const SKIP_DROPS                            = 0b000_0000_1000;
-        const MOVED                                 = 0b000_0001_0000;
-        const SKIP_REDSTONE_WIRE_STATE_REPLACEMENT  = 0b000_0010_0000;
-        const SKIP_BLOCK_ENTITY_REPLACED_CALLBACK   = 0b000_0100_0000;
-        const SKIP_BLOCK_ADDED_CALLBACK             = 0b000_1000_0000;
-    }
-}
-
-#[derive(Debug, Error)]
-pub enum GetBlockError {
-    InvalidBlockId,
-    BlockOutOfWorldBounds,
-}
-
-impl std::fmt::Display for GetBlockError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{self:?}")
-    }
-}
 
 impl PumpkinError for GetBlockError {
     fn is_kick(&self) -> bool {
@@ -148,6 +122,7 @@ impl PumpkinError for GetBlockError {
 pub struct World {
     /// The underlying level, responsible for chunk management and terrain generation.
     pub level: Arc<Level>,
+    pub level_info: Arc<LevelData>,
     /// A map of active players within the world, keyed by their unique UUID.
     pub players: Arc<RwLock<HashMap<uuid::Uuid, Arc<Player>>>>,
     /// A map of active entities within the world, keyed by their unique UUID.
@@ -166,24 +141,32 @@ pub struct World {
     pub weather: Mutex<Weather>,
     /// Block Behaviour
     pub block_registry: Arc<BlockRegistry>,
+    synced_block_event_queue: Mutex<Vec<BlockEvent>>,
     /// A map of unsent block changes, keyed by block position.
     unsent_block_changes: Mutex<HashMap<BlockPos, u16>>,
-    // TODO: entities
 }
 
 impl World {
     #[must_use]
     pub fn load(
         level: Level,
+        level_info: Arc<LevelData>,
         dimension_type: DimensionType,
         block_registry: Arc<BlockRegistry>,
     ) -> Self {
         // TODO
-        let generation_settings = GENERATION_SETTINGS
-            .get(&GeneratorSetting::Overworld)
-            .unwrap();
+        let generation_settings = match dimension_type {
+            DimensionType::Overworld => GENERATION_SETTINGS
+                .get(&GeneratorSetting::Overworld)
+                .unwrap(),
+            DimensionType::OverworldCaves => todo!(),
+            DimensionType::TheEnd => GENERATION_SETTINGS.get(&GeneratorSetting::End).unwrap(),
+            DimensionType::TheNether => GENERATION_SETTINGS.get(&GeneratorSetting::Nether).unwrap(),
+        };
+
         Self {
             level: Arc::new(level),
+            level_info,
             players: Arc::new(RwLock::new(HashMap::new())),
             entities: Arc::new(RwLock::new(HashMap::new())),
             scoreboard: Mutex::new(Scoreboard::new()),
@@ -193,6 +176,7 @@ impl World {
             weather: Mutex::new(Weather::new()),
             block_registry,
             sea_level: generation_settings.sea_level,
+            synced_block_event_queue: Mutex::new(Vec::new()),
             unsent_block_changes: Mutex::new(HashMap::new()),
         }
     }
@@ -214,6 +198,37 @@ impl World {
             VarInt(effect_type as i32),
         ))
         .await;
+    }
+
+    pub async fn add_synced_block_event(&self, pos: BlockPos, r#type: u8, data: u8) {
+        let mut queue = self.synced_block_event_queue.lock().await;
+        queue.push(BlockEvent { pos, r#type, data });
+    }
+
+    async fn flush_synced_block_events(self: &Arc<Self>) {
+        let mut queue = self.synced_block_event_queue.lock().await;
+        let events: Vec<BlockEvent> = queue.clone();
+        queue.clear();
+        // THIS IS IMPORTANT
+        // it prevents deadlocks and also removes the need to wait for a lock when adding a new synced block
+        drop(queue);
+        for event in events {
+            let block = self.get_block(&event.pos).await.unwrap(); // TODO
+            if !self
+                .block_registry
+                .on_synced_block_event(&block, self, &event.pos, event.r#type, event.data)
+                .await
+            {
+                continue;
+            }
+            self.broadcast_packet_all(&CBlockEvent::new(
+                event.pos,
+                event.r#type,
+                event.data,
+                VarInt(i32::from(block.id)),
+            ))
+            .await;
+        }
     }
 
     /// Broadcasts a packet to all connected players within the world.
@@ -364,6 +379,9 @@ impl World {
 
     pub async fn tick(self: &Arc<Self>, server: &Server) {
         self.flush_block_updates().await;
+        // tick block entities
+        self.level.tick_block_entities(self.clone()).await;
+        self.flush_synced_block_events().await;
 
         // world ticks
         {
@@ -381,8 +399,10 @@ impl World {
 
         self.tick_scheduled_block_ticks().await;
 
+        let players_to_tick: Vec<_> = self.players.read().await.values().cloned().collect();
+
         // player ticks
-        for player in self.players.read().await.values() {
+        for player in players_to_tick {
             player.tick(server).await;
         }
 
@@ -390,7 +410,7 @@ impl World {
 
         // Entity ticks
         for entity in entities_to_tick {
-            entity.tick(server).await;
+            entity.tick(entity.clone(), server).await;
             for player in self.players.read().await.values() {
                 if player
                     .living_entity
@@ -401,7 +421,7 @@ impl World {
                     .expand(1.0, 0.5, 1.0)
                     .intersects(&entity.get_entity().bounding_box.load())
                 {
-                    entity.on_player_collision(player.clone()).await;
+                    entity.on_player_collision(player).await;
                     break;
                 }
             }
@@ -471,7 +491,19 @@ impl World {
 
     /// Gets the y position of the first non air block from the top down
     pub async fn get_top_block(&self, position: Vector2<i32>) -> i32 {
-        for y in (-64..=319).rev() {
+        // TODO: this is bad
+        let generation_settings = match self.dimension_type {
+            DimensionType::Overworld => GENERATION_SETTINGS
+                .get(&GeneratorSetting::Overworld)
+                .unwrap(),
+            DimensionType::OverworldCaves => todo!(),
+            DimensionType::TheEnd => GENERATION_SETTINGS.get(&GeneratorSetting::End).unwrap(),
+            DimensionType::TheNether => GENERATION_SETTINGS.get(&GeneratorSetting::Nether).unwrap(),
+        };
+        for y in (i32::from(generation_settings.shape.min_y)
+            ..=i32::from(generation_settings.shape.height))
+            .rev()
+        {
             let pos = BlockPos(Vector3::new(position.x, y, position.z));
             let block = self.get_block_state(&pos).await;
             if let Ok(block) = block {
@@ -549,7 +581,7 @@ impl World {
 
             (position, yaw, pitch)
         } else {
-            let info = &self.level.level_info;
+            let info = &self.level_info;
             let position = Vector3::new(
                 f64::from(info.spawn_x),
                 f64::from(info.spawn_y) + 1.0,
@@ -870,7 +902,7 @@ impl World {
                 false,
                 false,
                 Some((death_dimension, death_location)),
-                0.into(),
+                VarInt(player.get_entity().portal_cooldown.load(Ordering::Relaxed) as i32),
                 self.sea_level.into(),
                 data_kept,
             ))
@@ -882,7 +914,7 @@ impl World {
         player.send_permission_lvl_update().await;
 
         // Teleport
-        let info = &self.level.level_info;
+        let info = &self.level_info;
         let mut position = Vector3::new(
             f64::from(info.spawn_x),
             f64::from(info.spawn_y),
@@ -1060,6 +1092,23 @@ impl World {
             }
         }
         None
+    }
+
+    pub async fn get_entities_at_box(&self, aabb: &BoundingBox) -> Vec<Arc<dyn EntityBase>> {
+        let entities_guard = self.entities.read().await;
+        entities_guard
+            .values()
+            .filter(|entity| entity.get_entity().bounding_box.load().intersects(aabb))
+            .cloned()
+            .collect()
+    }
+    pub async fn get_players_at_box(&self, aabb: &BoundingBox) -> Vec<Arc<Player>> {
+        let players_guard = self.players.read().await;
+        players_guard
+            .values()
+            .filter(|player| player.get_entity().bounding_box.load().intersects(aabb))
+            .cloned()
+            .collect()
     }
 
     /// Retrieves a player by their unique UUID.
@@ -1260,6 +1309,7 @@ impl World {
         let base_entity = entity.get_entity();
         self.broadcast_packet_all(&base_entity.create_spawn_packet())
             .await;
+        entity.init_data_tracker().await;
         let mut current_living_entities = self.entities.write().await;
         current_living_entities.insert(base_entity.entity_uuid, entity);
     }
@@ -1699,7 +1749,10 @@ impl World {
         }
     }
 
-    pub async fn get_block_entity(&self, block_pos: &BlockPos) -> Option<Arc<dyn BlockEntity>> {
+    pub async fn get_block_entity(
+        &self,
+        block_pos: &BlockPos,
+    ) -> Option<(NbtCompound, Arc<dyn BlockEntity>)> {
         let chunk = self.get_chunk(block_pos).await;
         let chunk: tokio::sync::RwLockReadGuard<ChunkData> = chunk.read().await;
 
@@ -1712,9 +1765,9 @@ impl World {
         let mut chunk: tokio::sync::RwLockWriteGuard<ChunkData> = chunk.write().await;
         let block_entity_nbt = block_entity.chunk_data_nbt();
 
-        if let Some(nbt) = block_entity_nbt {
+        if let Some(nbt) = &block_entity_nbt {
             let mut bytes = Vec::new();
-            to_bytes_unnamed(&nbt, &mut bytes).unwrap();
+            to_bytes_unnamed(nbt, &mut bytes).unwrap();
             self.broadcast_packet_all(&CBlockEntityData::new(
                 block_entity.get_position(),
                 VarInt(block_entity.get_id() as i32),
@@ -1723,7 +1776,10 @@ impl World {
             .await;
         }
 
-        chunk.block_entities.insert(block_pos, block_entity);
+        chunk.block_entities.insert(
+            block_pos,
+            (block_entity_nbt.unwrap_or_default(), block_entity),
+        );
         chunk.dirty = true;
     }
 
@@ -1834,5 +1890,37 @@ impl World {
         }
 
         (None, None)
+    }
+}
+
+#[async_trait]
+impl pumpkin_world::world::SimpleWorld for World {
+    async fn set_block_state(
+        self: Arc<Self>,
+        position: &BlockPos,
+        block_state_id: BlockStateId,
+        flags: BlockFlags,
+    ) -> BlockStateId {
+        Self::set_block_state(&self, position, block_state_id, flags).await
+    }
+
+    async fn get_block(&self, position: &BlockPos) -> Result<pumpkin_data::Block, GetBlockError> {
+        Self::get_block(self, position).await
+    }
+
+    async fn update_neighbor(self: Arc<Self>, neighbor_block_pos: &BlockPos, source_block: &Block) {
+        Self::update_neighbor(&self, neighbor_block_pos, source_block).await;
+    }
+
+    async fn update_neighbors(
+        self: Arc<Self>,
+        block_pos: &BlockPos,
+        except: Option<BlockDirection>,
+    ) {
+        Self::update_neighbors(&self, block_pos, except).await;
+    }
+
+    async fn remove_block_entity(&self, block_pos: &BlockPos) {
+        self.remove_block_entity(block_pos).await;
     }
 }
