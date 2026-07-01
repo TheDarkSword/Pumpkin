@@ -1,0 +1,24 @@
+[package]
+name = "pumpkin-test"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "In-memory test harness for the Pumpkin server."
+
+[lints]
+workspace = true
+
+[dependencies]
+pumpkin = { workspace = true, features = ["test-harness"] }
+pumpkin-config.workspace = true
+pumpkin-data.workspace = true
+pumpkin-protocol.workspace = true
+pumpkin-util.workspace = true
+arc-swap.workspace = true
+bytes.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["net", "sync"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }

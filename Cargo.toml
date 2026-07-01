@@ -11,7 +11,8 @@ members = [
     "pumpkin/",
     "pumpkin-data",
     "pumpkin-plugin-api",
-    "pumpkin-codecs"
+    "pumpkin-codecs",
+    "pumpkin-test"
 ]
 exclude = ["pumpkin-codegen"]
 
@@ -148,6 +149,7 @@ num-traits = { version = "0.2", default-features = false, features = ["std"] }
 p384 = { version = "0.13.1", default-features = false, features = ["std", "arithmetic", "pkcs8"] }
 phf = { version = "0.14.0", default-features = false, features = ["std"] }
 proc-macro2 = { version = "1.0", default-features = false, features = ["proc-macro"] }
+pumpkin = { path = "pumpkin", default-features = false }
 pumpkin-codecs = { path = "pumpkin-codecs", default-features = false }
 pumpkin-config = { path = "pumpkin-config", default-features = false }
 pumpkin-data = { path = "pumpkin-data", default-features = false }
