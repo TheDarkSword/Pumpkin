@@ -1156,3 +1156,48 @@ impl JavaClient {
         Ok(())
     }
 }
+
+#[cfg(feature = "test-harness")]
+impl JavaClient {
+    /// Test-only replacement for [`Self::start_outgoing_packet_task`].
+    ///
+    /// Drains both outgoing packet queues into the returned channel, yielding the
+    /// raw serialized clientbound frames instead of writing them to a socket, and
+    /// resolves the completion signal of high-priority sends so that
+    /// `send_packet_now` does not block. Call once, before the client is shared,
+    /// in place of `start_outgoing_packet_task`.
+    #[must_use]
+    pub fn start_test_capture(&mut self) -> tokio::sync::mpsc::UnboundedReceiver<Bytes> {
+        let mut packet_receiver = self
+            .outgoing_packet_queue_recv
+            .take()
+            .expect("This was set in the new fn");
+        let mut priority_packet_receiver = self
+            .outgoing_packet_priority_recv
+            .take()
+            .expect("This was set in the new fn");
+        let close_token = self.close_token.clone();
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        self.spawn_task(async move {
+            loop {
+                let recv_result = tokio::select! {
+                    biased;
+                    () = close_token.cancelled() => None,
+                    res = priority_packet_receiver.recv() => res,
+                    res = packet_receiver.recv() => res,
+                };
+
+                let Some(packet) = recv_result else {
+                    break;
+                };
+
+                // Forward the serialized clientbound frame to the test sink.
+                let _ = sender.send(packet.data);
+                if let Some(completion) = packet.completion {
+                    let _ = completion.send(());
+                }
+            }
+        });
+        receiver
+    }
+}

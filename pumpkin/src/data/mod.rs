@@ -35,6 +35,20 @@ impl VanillaData {
             whitelist_config: RwLock::new(whitelist::WhitelistConfig::load()),
         }
     }
+
+    /// Builds in-memory default data lists without touching the filesystem, so
+    /// tests stay isolated and deterministic.
+    #[cfg(feature = "test-harness")]
+    #[must_use]
+    pub fn for_test() -> Self {
+        Self {
+            banned_ip_list: RwLock::new(banned_ip::BannedIpList::default()),
+            banned_player_list: RwLock::new(banned_player::BannedPlayerList::default()),
+            operator_config: RwLock::new(op::OperatorConfig::default()),
+            user_cache: RwLock::new(usercache::UserCache::default()),
+            whitelist_config: RwLock::new(whitelist::WhitelistConfig::default()),
+        }
+    }
 }
 
 pub trait LoadJSONConfiguration {
