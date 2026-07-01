@@ -39,6 +39,15 @@ pub struct ItemEntity {
     never_pickup: AtomicBool,
 }
 
+#[cfg(feature = "test-harness")]
+impl ItemEntity {
+    /// Returns a clone of the carried stack, for test assertions.
+    #[must_use]
+    pub async fn stack(&self) -> ItemStack {
+        self.item_stack.lock().await.clone()
+    }
+}
+
 impl ItemEntity {
     pub fn new(entity: Entity, item_stack: ItemStack) -> Self {
         entity.velocity.store(Vector3::new(

@@ -58,6 +58,10 @@ rustc-hash.workspace = true
 slotmap.workspace = true
 crossfire.workspace = true
 
+[features]
+# Enables in-crate test helpers (e.g. the empty-chunk constructor). Off in normal builds.
+test-harness = []
+
 [dev-dependencies]
 criterion = { workspace = true, features = ["html_reports", "async_tokio"] }
 temp-dir.workspace = true

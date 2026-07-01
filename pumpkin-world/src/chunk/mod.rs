@@ -84,6 +84,32 @@ pub struct ChunkData {
     pub dirty: AtomicBool,
 }
 
+#[cfg(feature = "test-harness")]
+impl ChunkData {
+    /// Builds an empty (all-air) overworld chunk without running world
+    /// generation. Light arrays are empty and blocks/biomes are the default
+    /// palette entry. Insert it into `Level::loaded_chunks` to make the chunk
+    /// available to block reads and writes in fast tests.
+    #[must_use]
+    pub fn empty_overworld(x: i32, z: i32) -> Self {
+        // Overworld dimensions: min_y = -64, height = 384 -> 24 sections.
+        Self {
+            section: ChunkSections::new(24, -64),
+            heightmap: std::sync::Mutex::new(ChunkHeightmaps::default()),
+            x,
+            z,
+            block_ticks: ChunkTickScheduler::default(),
+            fluid_ticks: ChunkTickScheduler::default(),
+            pending_block_entities: std::sync::Mutex::new(FxHashMap::default()),
+            light_engine: std::sync::Mutex::new(ChunkLight::default()),
+            light_populated: AtomicBool::new(false),
+            status: ChunkStatus::Full,
+            blending_data: None,
+            dirty: AtomicBool::new(false),
+        }
+    }
+}
+
 pub struct ChunkEntityData {
     /// Chunk X
     pub x: i32,
