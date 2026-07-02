@@ -24,6 +24,16 @@ use std::thread;
 use std::time::Duration;
 use tracing::{debug, error, info, trace, warn};
 
+/// Best-effort extraction of a human-readable message from a caught panic
+/// payload (`catch_unwind` hands back a `Box<dyn Any>`).
+fn panic_reason(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "unknown cause".to_string())
+}
+
 pub(crate) struct TaskHeapNode(i8, NodeKey);
 impl PartialEq for TaskHeapNode {
     fn eq(&self, other: &Self) -> bool {
@@ -172,7 +182,25 @@ impl GenerationSchedule {
                     lighting_config,
                     last_unload: std::time::Instant::now(),
                 };
-                scheduler.work(level_sched);
+                // This thread owns all chunk loading, generation and unloading.
+                // If `work` panics the thread would just disappear: chunk loads
+                // would hang forever and, worse, unloads would stop, so
+                // `loaded_chunks` (and the entity/block-entity maps keyed off it)
+                // would grow without bound until the server runs out of memory.
+                // Catch the panic, log it loudly and flag the chunk system as down
+                // (waking anyone blocked on it) so the failure is visible instead
+                // of a silent freeze.
+                let level_on_panic = level_sched.clone();
+                if let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                    move || scheduler.work(level_sched),
+                )) {
+                    error!(
+                        "Chunk scheduler thread panicked and stopped: {}. Chunk loading, saving and unloading are halted for this world.",
+                        panic_reason(&*panic)
+                    );
+                    level_on_panic.shut_down_chunk_system.store(true, Relaxed);
+                    level_on_panic.level_channel.notify();
+                }
             })
             .expect("Failed to spawn Scheduler Thread");
 
@@ -1380,5 +1408,23 @@ impl GenerationSchedule {
             }
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod panic_reason_tests {
+    use super::panic_reason;
+
+    #[test]
+    fn extracts_str_and_string_payloads() {
+        let payload: Box<dyn std::any::Any + Send> = Box::new("boom");
+        assert_eq!(panic_reason(&*payload), "boom");
+
+        let payload: Box<dyn std::any::Any + Send> = Box::new(String::from("kaboom"));
+        assert_eq!(panic_reason(&*payload), "kaboom");
+
+        // Anything that isn't a string message falls back to a placeholder.
+        let payload: Box<dyn std::any::Any + Send> = Box::new(42_i32);
+        assert_eq!(panic_reason(&*payload), "unknown cause");
     }
 }
