@@ -2816,6 +2816,7 @@ dependencies = [
  "pumpkin-nbt",
  "pumpkin-util",
  "pumpkin-world",
+ "rustc-hash",
  "serde",
  "thiserror 2.0.18",
  "tokio",

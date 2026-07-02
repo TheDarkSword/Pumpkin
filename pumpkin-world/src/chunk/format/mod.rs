@@ -128,10 +128,14 @@ impl ChunkData {
         }
 
         // Assemble the LightEngine
-        let light_engine = ChunkLight {
+        let mut light_engine = ChunkLight {
             block_light: block_lights.into_boxed_slice(),
             sky_light: sky_lights.into_boxed_slice(),
         };
+        // Collapse the full-bright sky arrays we just read back into the compact
+        // in-memory form so loaded chunks don't hold ~30 KB of redundant light
+        // each. They are re-expanded on save.
+        light_engine.compact();
 
         // Assemble the ChunkSections
         let min_y = section_coords::section_to_block(chunk_data.min_y_section);
@@ -183,13 +187,6 @@ impl ChunkData {
             entities_guard.values().cloned().collect::<Vec<_>>()
         };
 
-        fn extract_light_ref(light: Option<&LightContainer>) -> Option<&[u8]> {
-            match light {
-                Some(LightContainer::Full(data)) => Some(data.as_ref()),
-                _ => None,
-            }
-        }
-
         let light_lock = self.light_engine.lock().unwrap();
         let heightmap_lock = self.heightmap.lock().unwrap();
         let block_lock = self.section.block_sections.read().unwrap();
@@ -197,13 +194,33 @@ impl ChunkData {
 
         let min_section_y = (self.section.min_y >> 4) as i8;
 
+        // Re-expand any sections that were compacted in memory so the bytes we
+        // write match what a non-compacted chunk would have produced (`Empty(0)`
+        // still means "no data" and is dropped). See `LightContainer::to_full_bytes`.
+        let block_light: Vec<Option<std::borrow::Cow<[u8]>>> = (0..self.section.count)
+            .map(|i| {
+                light_lock
+                    .block_light
+                    .get(i)
+                    .and_then(LightContainer::to_full_bytes)
+            })
+            .collect();
+        let sky_light: Vec<Option<std::borrow::Cow<[u8]>>> = (0..self.section.count)
+            .map(|i| {
+                light_lock
+                    .sky_light
+                    .get(i)
+                    .and_then(LightContainer::to_full_bytes)
+            })
+            .collect();
+
         let sections = (0..self.section.count)
             .map(|i| ChunkSectionNbtRef {
                 y: i as i8 + min_section_y,
                 block_states: Some(block_lock[i].to_disk_nbt()),
                 biomes: Some(biome_lock[i].to_disk_nbt()),
-                block_light: extract_light_ref(light_lock.block_light.get(i)),
-                sky_light: extract_light_ref(light_lock.sky_light.get(i)),
+                block_light: block_light[i].as_deref(),
+                sky_light: sky_light[i].as_deref(),
             })
             .collect::<Vec<_>>();
 
@@ -431,6 +448,54 @@ impl LightContainer {
     pub fn fill(&mut self, value: u8) {
         *self = Self::new_filled(value);
     }
+
+    /// Collapse a `Full` array that holds a single uniform, non-zero light level
+    /// back into the compact `Empty` form. This is what freshly generated sky
+    /// light looks like for every section above the terrain (a full-bright
+    /// 2048-byte array), so collapsing it keeps resident chunks much smaller.
+    ///
+    /// Level 0 is deliberately left alone: `Empty(0)` is the "no data" sentinel
+    /// that is dropped on save, so collapsing a uniform-dark array into it would
+    /// change what ends up on disk. Everything else is re-expanded at
+    /// serialization time (see `internal_to_bytes`), so this stays a pure
+    /// in-memory optimisation and the stored bytes are unaffected.
+    pub fn compact(&mut self) {
+        if let Self::Full(data) = self {
+            let first = data[0];
+            let low = first & 0x0F;
+            let high = first >> 4;
+            if low == high && low != 0 && data.iter().all(|&b| b == first) {
+                *self = Self::Empty(low);
+            }
+        }
+    }
+
+    /// Whether this section carries light that has to be written out as an array
+    /// rather than flagged empty. Everything except the `Empty(0)` "no data"
+    /// sentinel does. Cheap counterpart to [`Self::to_full_bytes`] — the two must
+    /// always agree so light masks and the arrays that follow them stay in sync.
+    #[must_use]
+    pub fn has_light(&self) -> bool {
+        !matches!(self, Self::Empty(0))
+    }
+
+    /// The full 2048-byte light array for this section, or `None` for `Empty(0)`.
+    ///
+    /// A section compacted by [`Self::compact`] (`Empty(level)`, level != 0) is
+    /// rebuilt into its full array here, so every consumer that reads light —
+    /// the on-disk format and the clientbound chunk/light packets — sees exactly
+    /// the bytes a non-compacted chunk would have produced.
+    #[must_use]
+    pub fn to_full_bytes(&self) -> Option<std::borrow::Cow<'_, [u8]>> {
+        match self {
+            Self::Full(data) => Some(std::borrow::Cow::Borrowed(data)),
+            Self::Empty(level) if *level != 0 => {
+                let packed = (level << 4) | level;
+                Some(std::borrow::Cow::Owned(vec![packed; Self::ARRAY_SIZE]))
+            }
+            _ => None,
+        }
+    }
 }
 
 impl Default for LightContainer {
@@ -493,4 +558,112 @@ struct EntityNbt {
     data_version: i32,
     position: [i32; 2],
     entities: Vec<NbtCompound>,
+}
+
+#[cfg(test)]
+mod light_compaction {
+    use super::LightContainer;
+    use crate::chunk::{ChunkData, ChunkHeightmaps, ChunkLight, ChunkSections};
+    use crate::tick::scheduler::ChunkTickScheduler;
+    use pumpkin_data::chunk::ChunkStatus;
+    use pumpkin_util::math::vector2::Vector2;
+    use rustc_hash::FxHashMap;
+    use std::sync::Mutex;
+    use std::sync::atomic::AtomicBool;
+
+    /// An overworld chunk laid out the way generation leaves it: dark sky below
+    /// the terrain, one genuinely non-uniform section at the surface, and
+    /// full-bright sky arrays for every section above.
+    fn build_lit_chunk() -> ChunkData {
+        let count = 24usize;
+        let min_y = -64i32;
+
+        let block_light = (0..count)
+            .map(|_| LightContainer::Empty(0))
+            .collect::<Vec<_>>();
+        let mut sky_light = Vec::with_capacity(count);
+        for i in 0..count {
+            match i.cmp(&8) {
+                std::cmp::Ordering::Less => sky_light.push(LightContainer::Empty(0)),
+                std::cmp::Ordering::Equal => {
+                    // Non-uniform: must survive serialization byte-for-byte.
+                    let mut lc = LightContainer::new_filled(0);
+                    lc.set(1, 2, 3, 7);
+                    sky_light.push(lc);
+                }
+                std::cmp::Ordering::Greater => sky_light.push(LightContainer::new_filled(15)),
+            }
+        }
+
+        ChunkData {
+            section: ChunkSections::new(count, min_y),
+            heightmap: Mutex::new(ChunkHeightmaps::default()),
+            x: 0,
+            z: 0,
+            block_ticks: ChunkTickScheduler::default(),
+            fluid_ticks: ChunkTickScheduler::default(),
+            pending_block_entities: Mutex::new(FxHashMap::default()),
+            light_engine: Mutex::new(ChunkLight {
+                sky_light: sky_light.into_boxed_slice(),
+                block_light: block_light.into_boxed_slice(),
+            }),
+            light_populated: AtomicBool::new(true),
+            status: ChunkStatus::Full,
+            blending_data: None,
+            dirty: AtomicBool::new(true),
+        }
+    }
+
+    #[tokio::test]
+    async fn compaction_shrinks_memory_but_keeps_disk_bytes() {
+        let full = build_lit_chunk();
+        let compacted = build_lit_chunk();
+        compacted.light_engine.lock().unwrap().compact();
+
+        // The uniform full-bright sections must collapse to `Empty`...
+        {
+            let light = compacted.light_engine.lock().unwrap();
+            assert!(
+                matches!(light.sky_light[20], LightContainer::Empty(15)),
+                "uniform full-bright sky should compact to Empty(15)"
+            );
+            // ...while the non-uniform surface section stays a full array.
+            assert!(matches!(light.sky_light[8], LightContainer::Full(_)));
+        }
+
+        // ...but the serialized bytes must be identical either way.
+        let bytes_full = full.internal_to_bytes().await.unwrap();
+        let bytes_compact = compacted.internal_to_bytes().await.unwrap();
+        assert_eq!(
+            bytes_full, bytes_compact,
+            "compaction must not change the on-disk bytes"
+        );
+
+        // A round-trip preserves the light values.
+        let reloaded = ChunkData::internal_from_bytes(&bytes_compact, Vector2::new(0, 0)).unwrap();
+        let light = reloaded.light_engine.lock().unwrap();
+        assert_eq!(light.sky_light[20].get(0, 0, 0), 15);
+        assert_eq!(light.sky_light[0].get(0, 0, 0), 0);
+        assert_eq!(light.sky_light[8].get(1, 2, 3), 7);
+    }
+
+    #[test]
+    fn compacted_section_reads_identically_to_full() {
+        // This is what keeps the on-disk format and the clientbound light packets
+        // unchanged: a compacted uniform section must report the same "has light"
+        // flag and the same array bytes as the full section it replaced.
+        let full = LightContainer::new_filled(15);
+        let compacted = LightContainer::Empty(15);
+        assert!(full.has_light() && compacted.has_light());
+        assert_eq!(
+            full.to_full_bytes().unwrap().as_ref(),
+            compacted.to_full_bytes().unwrap().as_ref(),
+            "compacted section must serialize/transmit the same bytes as the full array"
+        );
+
+        // Empty(0) is the "no light" sentinel: flagged empty, no array emitted.
+        let dark = LightContainer::Empty(0);
+        assert!(!dark.has_light());
+        assert!(dark.to_full_bytes().is_none());
+    }
 }

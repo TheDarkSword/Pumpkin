@@ -245,13 +245,16 @@ impl ClientPacket for CChunkData<'_> {
             for section_index in 0..num_sections {
                 let bit_index = section_index + 1; // Offset by 1 for the below-world section
 
-                if let LightContainer::Full(_) = &light_engine.sky_light[section_index] {
+                // A compacted uniform section (`Empty(level != 0)`) still carries
+                // light and must be sent as an array, so key off `has_light()`
+                // rather than only matching `Full`.
+                if light_engine.sky_light[section_index].has_light() {
                     sky_light_mask |= 1 << bit_index;
                 } else {
                     sky_light_empty_mask |= 1 << bit_index;
                 }
 
-                if let LightContainer::Full(_) = &light_engine.block_light[section_index] {
+                if light_engine.block_light[section_index].has_light() {
                     block_light_mask |= 1 << bit_index;
                 } else {
                     block_light_empty_mask |= 1 << bit_index;
@@ -276,7 +279,7 @@ impl ClientPacket for CChunkData<'_> {
             // Write Sky Light arrays
             write.write_var_int(&VarInt(sky_light_mask.count_ones() as i32))?;
             for section_index in 0..num_sections {
-                if let LightContainer::Full(data) = &light_engine.sky_light[section_index] {
+                if let Some(data) = light_engine.sky_light[section_index].to_full_bytes() {
                     write.write_var_int(&light_data_size)?;
                     write.write_slice(data.as_ref())?;
                 }
@@ -285,12 +288,105 @@ impl ClientPacket for CChunkData<'_> {
             // Write Block Light arrays
             write.write_var_int(&VarInt(block_light_mask.count_ones() as i32))?;
             for section_index in 0..num_sections {
-                if let LightContainer::Full(data) = &light_engine.block_light[section_index] {
+                if let Some(data) = light_engine.block_light[section_index].to_full_bytes() {
                     write.write_var_int(&light_data_size)?;
                     write.write_slice(data.as_ref())?;
                 }
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::java::client::play::light_update::CLightUpdate;
+    use pumpkin_world::chunk::{ChunkHeightmaps, ChunkLight, ChunkSections};
+    use pumpkin_world::tick::scheduler::ChunkTickScheduler;
+    use rustc_hash::FxHashMap;
+    use std::sync::Mutex;
+    use std::sync::atomic::AtomicBool;
+
+    /// An overworld chunk lit the way generation leaves it: dark sky below the
+    /// terrain, one genuinely non-uniform section at the surface, and full-bright
+    /// sky above. With `compact` set, the uniform sky sections are collapsed the
+    /// same way a live chunk's light is, so the two variants must still produce
+    /// byte-identical packets.
+    fn chunk_with_sky_light(compact: bool) -> ChunkData {
+        let count = 24usize;
+        let min_y = -64i32;
+
+        let mut sky = Vec::with_capacity(count);
+        let mut block = Vec::with_capacity(count);
+        for i in 0..count {
+            block.push(LightContainer::Empty(0));
+            match i.cmp(&8) {
+                std::cmp::Ordering::Less => sky.push(LightContainer::Empty(0)),
+                std::cmp::Ordering::Equal => {
+                    let mut lc = LightContainer::new_filled(0);
+                    lc.set(1, 2, 3, 7);
+                    sky.push(lc);
+                }
+                std::cmp::Ordering::Greater => sky.push(LightContainer::new_filled(15)),
+            }
+        }
+
+        let mut light = ChunkLight {
+            sky_light: sky.into_boxed_slice(),
+            block_light: block.into_boxed_slice(),
+        };
+        if compact {
+            light.compact();
+        }
+
+        ChunkData {
+            section: ChunkSections::new(count, min_y),
+            heightmap: Mutex::new(ChunkHeightmaps::default()),
+            x: 0,
+            z: 0,
+            block_ticks: ChunkTickScheduler::default(),
+            fluid_ticks: ChunkTickScheduler::default(),
+            pending_block_entities: Mutex::new(FxHashMap::default()),
+            light_engine: Mutex::new(light),
+            light_populated: AtomicBool::new(true),
+            status: pumpkin_data::chunk::ChunkStatus::Full,
+            blending_data: None,
+            dirty: AtomicBool::new(true),
+        }
+    }
+
+    #[test]
+    fn compaction_keeps_chunk_data_packet_identical() {
+        let version = JavaMinecraftVersion::V_1_21_4;
+        let mut uncompacted = Vec::new();
+        let mut compacted = Vec::new();
+        CChunkData(&chunk_with_sky_light(false))
+            .write_packet_data(&mut uncompacted, &version)
+            .unwrap();
+        CChunkData(&chunk_with_sky_light(true))
+            .write_packet_data(&mut compacted, &version)
+            .unwrap();
+        assert_eq!(
+            uncompacted, compacted,
+            "in-memory light compaction must not change the chunk-data packet a client receives"
+        );
+    }
+
+    #[test]
+    fn compaction_keeps_light_update_packet_identical() {
+        let version = JavaMinecraftVersion::V_1_21_4;
+        let mut uncompacted = Vec::new();
+        let mut compacted = Vec::new();
+        CLightUpdate(&chunk_with_sky_light(false))
+            .write_packet_data(&mut uncompacted, &version)
+            .unwrap();
+        CLightUpdate(&chunk_with_sky_light(true))
+            .write_packet_data(&mut compacted, &version)
+            .unwrap();
+        assert_eq!(
+            uncompacted, compacted,
+            "in-memory light compaction must not change the light-update packet a client receives"
+        );
     }
 }

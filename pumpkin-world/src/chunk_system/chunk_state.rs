@@ -300,7 +300,11 @@ impl Chunk {
         // Move the light data instead of cloning it
         // By taking ownership of proto_chunk, we can move the light data directly
         // This prevents keeping duplicate lighting data in memory
-        let light_data = proto_chunk.light;
+        let mut light_data = proto_chunk.light;
+        // Generation fills a full-bright 2048-byte sky array for every section
+        // above the terrain. Collapse those uniform sections so a resident chunk
+        // doesn't carry ~30 KB of redundant light; they are re-expanded on save.
+        light_data.compact();
 
         // Only mark lit if past the lighting stage, and the lighting config is "default" ("full" and "dark" modes skip proper lighting)
         let is_lit = proto_chunk.stage >= StagedChunkEnum::Lighting

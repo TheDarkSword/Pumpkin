@@ -152,6 +152,19 @@ pub struct ChunkLight {
     pub block_light: Box<[LightContainer]>,
 }
 
+impl ChunkLight {
+    /// Compact every section in place, collapsing uniform full-bright light into
+    /// the cheap `Empty` representation. See [`LightContainer::compact`].
+    pub fn compact(&mut self) {
+        for section in &mut self.sky_light {
+            section.compact();
+        }
+        for section in &mut self.block_light {
+            section.compact();
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum ChunkHeightmapType {
     WorldSurface = 0,

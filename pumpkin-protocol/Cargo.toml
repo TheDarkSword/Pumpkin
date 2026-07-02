@@ -37,6 +37,7 @@ bitflags.workspace = true
 
 [dev-dependencies]
 # Validate correctness
+rustc-hash.workspace = true
 
 [lints]
 workspace = true
