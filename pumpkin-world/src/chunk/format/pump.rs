@@ -4,12 +4,15 @@ use std::path::PathBuf;
 
 use crate::chunk::format::anvil::SingleChunkDataSerializer;
 use crate::chunk::io::{ChunkSerializer, LoadedData};
-use crate::chunk::{ChunkReadingError, ChunkWritingError};
+use crate::chunk::{ChunkReadingError, ChunkWritingError, CompressionError};
 use bytes::Bytes;
+use flate2::Compression;
+use flate2::read::ZlibDecoder;
+use flate2::write::ZlibEncoder;
 use pumpkin_util::math::vector2::Vector2;
 use ruzstd::decoding::StreamingDecoder;
-use ruzstd::encoding::{CompressionLevel, compress_to_vec};
 use serde::{Deserialize, Serialize};
+use std::io::{Read, Write};
 
 pub struct PumpFile<D> {
     pub data: PumpData,
@@ -30,6 +33,37 @@ impl<D> Default for PumpFile<D> {
             _phantom: PhantomData,
         }
     }
+}
+
+/// Magic bytes of a zstd frame (little-endian `0xFD2FB528`). Chunk blobs saved
+/// before the switch to zlib start with these, so we sniff them on read and
+/// keep decoding old worlds; everything written from now on is zlib.
+const ZSTD_FRAME_MAGIC: [u8; 4] = [0x28, 0xB5, 0x2F, 0xFD];
+
+/// Deflate level for chunk blobs. `ruzstd`'s pure-Rust encoder can only emit its
+/// weakest ("Fastest") level, which on chunk NBT ends up roughly 55% larger than
+/// zlib level 6, while level 9 saves practically nothing more on this data for
+/// noticeably more CPU. `flate2` is already a workspace dependency and keeps the
+/// pure-Rust `miniz_oxide` backend, so switching costs us no native build.
+const CHUNK_DEFLATE_LEVEL: u32 = 6;
+
+fn compress_chunk(bytes: &[u8]) -> std::io::Result<Vec<u8>> {
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::new(CHUNK_DEFLATE_LEVEL));
+    encoder.write_all(bytes)?;
+    encoder.finish()
+}
+
+fn decompress_chunk(blob: &[u8]) -> std::io::Result<Vec<u8>> {
+    let mut decompressed = Vec::new();
+    if blob.len() >= ZSTD_FRAME_MAGIC.len() && blob[..ZSTD_FRAME_MAGIC.len()] == ZSTD_FRAME_MAGIC {
+        // Legacy blob: decode the zstd frame with the pure-Rust reader.
+        let mut decoder =
+            StreamingDecoder::new(blob).map_err(|e| std::io::Error::other(e.to_string()))?;
+        decoder.read_to_end(&mut decompressed)?;
+    } else {
+        ZlibDecoder::new(blob).read_to_end(&mut decompressed)?;
+    }
+    Ok(decompressed)
 }
 
 impl<D> ChunkSerializer for PumpFile<D>
@@ -89,7 +123,8 @@ where
             .await
             .map_err(|e| ChunkWritingError::ChunkSerializingError(e.to_string()))?;
 
-        let compressed = compress_to_vec(&bytes[..], CompressionLevel::Fastest);
+        let compressed = compress_chunk(&bytes)
+            .map_err(|e| ChunkWritingError::Compression(CompressionError::ZlibError(e)))?;
 
         self.data.chunks.insert(index.to_string(), compressed);
 
@@ -107,25 +142,15 @@ where
             let index = (rel_x + rel_z * 32) as usize;
 
             if let Some(chunk_bytes) = self.data.chunks.get(&index.to_string()) {
-                let mut decoder = match StreamingDecoder::new(&chunk_bytes[..]) {
-                    Ok(d) => d,
+                let decompressed = match decompress_chunk(chunk_bytes) {
+                    Ok(data) => data,
                     Err(e) => {
                         let _ = stream
-                            .send(LoadedData::Error((
-                                pos,
-                                ChunkReadingError::IoError(std::io::Error::other(e.to_string())),
-                            )))
+                            .send(LoadedData::Error((pos, ChunkReadingError::IoError(e))))
                             .await;
                         continue;
                     }
                 };
-                let mut decompressed = Vec::new();
-                if let Err(e) = std::io::Read::read_to_end(&mut decoder, &mut decompressed) {
-                    let _ = stream
-                        .send(LoadedData::Error((pos, ChunkReadingError::IoError(e))))
-                        .await;
-                    continue;
-                }
 
                 let bytes = Bytes::from(decompressed);
                 match D::from_bytes(&bytes, pos) {
@@ -228,6 +253,34 @@ mod tests {
                 assert_eq!(c.data, vec![1, 2, 3]);
             }
             _ => panic!("Expected LoadedData::Loaded"),
+        }
+    }
+
+    /// Worlds saved before the zlib switch hold zstd-compressed blobs; make sure
+    /// the magic-byte sniffing in `decompress_chunk` still reads them back.
+    #[tokio::test]
+    async fn test_reads_legacy_zstd_blob() {
+        use ruzstd::encoding::{CompressionLevel, compress_to_vec};
+
+        let chunk = MockChunk {
+            x: 0,
+            z: 0,
+            data: vec![7, 8, 9],
+        };
+        let raw = chunk.to_bytes().await.unwrap();
+        let legacy_blob = compress_to_vec(&raw[..], CompressionLevel::Fastest);
+
+        let mut pump_file: PumpFile<MockChunk> = PumpFile::default();
+        pump_file.data.chunks.insert("0".to_string(), legacy_blob);
+
+        let (stream_tx, mut stream_rx) = tokio::sync::mpsc::channel(1);
+        pump_file
+            .get_chunks(vec![Vector2::new(0, 0)], stream_tx)
+            .await;
+
+        match stream_rx.recv().await.unwrap() {
+            LoadedData::Loaded(c) => assert_eq!(c.data, vec![7, 8, 9]),
+            _ => panic!("legacy zstd blob failed to load"),
         }
     }
 }
