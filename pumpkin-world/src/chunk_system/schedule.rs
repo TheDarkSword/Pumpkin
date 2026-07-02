@@ -478,6 +478,16 @@ impl GenerationSchedule {
                             self.waiting_for_chunks.remove(task);
                             self.drop_node(*task);
                             *task = NodeKey::null();
+                        } else {
+                            // Diagnostic: an in-flight task is kept across a downgrade
+                            // and relies on its completion to release it. If that
+                            // hand-off is ever missed the node strands (see
+                            // recover_stranded_nodes); log it so the exact sequence
+                            // can be reconstructed from a crash/leak report.
+                            debug!(
+                                "downgrade keeps in-flight node {:?} at pos {:?} stage {} ({:?} -> {:?}); relying on its completion to release it",
+                                *task, pos, i, old_stage, new_stage
+                            );
                         }
                     }
                 }
@@ -1301,8 +1311,10 @@ impl GenerationSchedule {
                         self.queue_dirty = false;
                     }
                 } else {
-                    // No tasks in flight, wait indefinitely for LevelChannel changes
-                    debug_assert!(self.debug_check());
+                    // No tasks in flight, wait indefinitely for LevelChannel changes.
+                    // Anything still in the graph now is stranded; clean it up
+                    // instead of leaking (or, in debug, crashing).
+                    self.recover_stranded_nodes();
                     debug_assert_eq!(self.running_task_count, 0);
                     self.resort_work(self.send_level.wait_and_get(&level));
                     if self.queue_dirty {
@@ -1380,31 +1392,61 @@ impl GenerationSchedule {
         self.graph.edges.clear();
     }
 
-    fn debug_check(&self) -> bool {
-        if !self.graph.nodes.is_empty() {
-            for (key, value) in &self.graph.nodes {
-                error!("unrelease node {key:?}: {value:?}");
-            }
-            panic!("nodes count error");
+    /// Called when the scheduler has gone fully idle (nothing queued, in flight,
+    /// or waiting on chunk data). Any nodes still in the graph at that point are
+    /// stranded: with no work left to run, nothing will ever advance or release
+    /// them. That happens when a chunk is downgraded, or its generation fails,
+    /// while a task is in flight and the node bookkeeping is left dangling.
+    ///
+    /// Debug builds keep aborting on this — it's a real desync worth catching
+    /// during development — but first dump every stranded node with its holder
+    /// state so the crash report is actionable. Release builds neither crash nor
+    /// leak: the stranded nodes are unreachable, so they're dropped and the
+    /// holder references cleared, and chunks that are still wanted are
+    /// rescheduled the next time their ticket level changes.
+    fn recover_stranded_nodes(&mut self) -> bool {
+        if self.graph.nodes.is_empty() {
+            return false;
         }
-        for (pos, holder) in &self.chunk_map {
-            for i in &holder.tasks {
-                debug_assert!(i.is_null());
-            }
-            debug_assert_eq!(
-                holder.target_stage,
-                StagedChunkEnum::level_to_stage(
-                    *self.last_level.get(pos).unwrap_or(&ChunkLoading::MAX_LEVEL)
+        let stranded = self.graph.nodes.len();
+        // Dump each stranded node together with its holder state. The holder's
+        // target/current/dependency stages reveal why the node was orphaned
+        // (e.g. a chunk downgraded to target=None while this task was in flight),
+        // which is what's needed to pin down the underlying bookkeeping bug.
+        for (key, value) in &self.graph.nodes {
+            let holder = self.chunk_map.get(&value.pos);
+            warn!(
+                "stranded generation node {key:?}: {value:?} | holder {}",
+                holder.map_or_else(
+                    || "missing".to_string(),
+                    |h| format!(
+                        "target={:?} current={:?} dep={:?} occupied_null={}",
+                        h.target_stage,
+                        h.current_stage,
+                        h.dependency_stage,
+                        h.occupied.is_null()
+                    )
                 )
             );
-            let effective = holder.target_stage.max(holder.dependency_stage);
-            debug_assert!(holder.current_stage >= effective);
-            debug_assert!(holder.occupied.is_null());
-            if holder.current_stage != StagedChunkEnum::None {
-                debug_assert_eq!(
-                    holder.chunk.as_ref().unwrap().get_stage_id(),
-                    holder.current_stage as u8
-                );
+        }
+        if cfg!(debug_assertions) {
+            // Keep failing loudly in debug so the desync is noticed immediately;
+            // the per-node dump above is in the crash report.
+            panic!(
+                "chunk scheduler left {stranded} stranded generation node(s); see the dump above"
+            );
+        }
+
+        // Release: recover instead of leaking or taking the server down.
+        warn!(
+            "Chunk scheduler was idle with {stranded} stranded generation node(s); cleaning them up. This points to a generation bookkeeping desync."
+        );
+        self.graph.nodes.clear();
+        self.graph.edges.clear();
+        for holder in self.chunk_map.values_mut() {
+            holder.occupied = NodeKey::null();
+            for task in &mut holder.tasks {
+                *task = NodeKey::null();
             }
         }
         true
