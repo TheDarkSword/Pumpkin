@@ -1,0 +1,17 @@
+[package]
+name = "pumpkin-test-macros"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Attribute macro for pumpkin-test integration tests."
+
+[lib]
+proc-macro = true
+
+[lints]
+workspace = true
+
+[dependencies]
+quote.workspace = true
+syn = { workspace = true, features = ["full", "parsing", "proc-macro"] }

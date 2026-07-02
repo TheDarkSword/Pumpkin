@@ -2832,10 +2832,19 @@ dependencies = [
  "pumpkin-config",
  "pumpkin-data",
  "pumpkin-protocol",
+ "pumpkin-test-macros",
  "pumpkin-util",
  "pumpkin-world",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "pumpkin-test-macros"
+version = "0.1.0-dev+26.2"
+dependencies = [
+ "quote",
+ "syn",
 ]
 
 [[package]]
