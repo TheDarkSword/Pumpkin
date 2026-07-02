@@ -60,10 +60,12 @@ impl TestServer {
     /// Boots a server on a fresh temporary directory with the given world seed,
     /// in offline mode, with only the overworld enabled and a small view
     /// distance to keep on-demand chunk generation cheap.
-    pub async fn new(seed: u64) -> Self {
+    pub async fn new(seed: i64) -> Self {
         let temp_dir = tempfile::tempdir().expect("failed to create temp world dir");
         let basic = BasicConfiguration {
-            seed: Seed(seed),
+            // Minecraft world seeds are signed (Java i64); Pumpkin stores the
+            // same bits as u64 and casts back with `seed.0 as i64`.
+            seed: Seed(seed as u64),
             online_mode: false,
             encryption: false,
             allow_chat_reports: false,

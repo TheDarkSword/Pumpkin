@@ -4,14 +4,14 @@
 use pumpkin_data::Block;
 use pumpkin_data::item::Item;
 use pumpkin_test::TestServer;
+use pumpkin_test_macros::pumpkin_test;
 use pumpkin_util::GameMode;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 
 /// Breaking a stone block with a pickaxe in survival drops one cobblestone.
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn break_stone_drops_cobblestone() {
-    let mut t = TestServer::new(12345).await;
+#[pumpkin_test(seed = 12345)]
+async fn break_stone_drops_cobblestone(mut t: TestServer) {
     t.insert_empty_chunk(0, 0);
 
     let player = t.add_player("Miner", GameMode::Survival).await;
@@ -42,9 +42,8 @@ async fn break_stone_drops_cobblestone() {
 }
 
 /// Using a block item on the top face of a block places a new block above it.
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn place_block_on_top_of_stone() {
-    let mut t = TestServer::new(12345).await;
+#[pumpkin_test(seed = 12345)]
+async fn place_block_on_top_of_stone(mut t: TestServer) {
     t.insert_empty_chunk(0, 0);
 
     let player = t.add_player("Builder", GameMode::Survival).await;
@@ -66,9 +65,8 @@ async fn place_block_on_top_of_stone() {
 }
 
 /// A position packet moves the player's entity to the requested coordinates.
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn player_position_updates() {
-    let mut t = TestServer::new(12345).await;
+#[pumpkin_test(seed = 12345)]
+async fn player_position_updates(mut t: TestServer) {
     let player = t.add_player("Walker", GameMode::Survival).await;
 
     let target = Vector3::new(1.0, 100.0, 2.0);
@@ -85,9 +83,8 @@ async fn player_position_updates() {
 }
 
 /// Setting a creative hotbar slot updates the player's held item.
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn creative_set_slot_updates_held_item() {
-    let mut t = TestServer::new(12345).await;
+#[pumpkin_test(seed = 12345)]
+async fn creative_set_slot_updates_held_item(mut t: TestServer) {
     let player = t.add_player("Creator", GameMode::Creative).await;
 
     // Container slot 36 is the first hotbar slot; the selected slot defaults to 0.

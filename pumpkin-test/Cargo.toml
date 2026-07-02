@@ -22,4 +22,5 @@ tempfile.workspace = true
 tokio = { workspace = true, features = ["net", "sync"] }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
+pumpkin-test-macros.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
