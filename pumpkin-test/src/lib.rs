@@ -205,6 +205,29 @@ impl TestServer {
     }
 }
 
+impl Drop for TestServer {
+    fn drop(&mut self) {
+        // Stop each world's generation threads so a finished test doesn't leave
+        // background threads running, which can stall CI runner cleanup.
+        for world in self.server.worlds.load().iter() {
+            let level = &world.level;
+            level.cancel_token.cancel();
+            level
+                .shut_down_chunk_system
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            level.level_channel.notify();
+            let handles: Vec<_> = level
+                .thread_tracker
+                .lock()
+                .map(|mut guard| guard.drain(..).collect())
+                .unwrap_or_default();
+            for handle in handles {
+                let _ = handle.join();
+            }
+        }
+    }
+}
+
 /// A player attached to a [`TestServer`].
 pub struct TestPlayer {
     /// The live player entity.
