@@ -29,20 +29,26 @@ use pumpkin_data::Block;
 use pumpkin_data::dimension::Dimension;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::packet::CURRENT_MC_VERSION;
 use pumpkin_protocol::codec::item_stack_seralizer::ItemStackSerializer;
 use pumpkin_protocol::codec::var_int::VarInt;
+use pumpkin_protocol::java::packet_decoder::TCPNetworkDecoder;
+use pumpkin_protocol::java::packet_encoder::TCPNetworkEncoder;
 use pumpkin_protocol::java::server::play::{
     SPlayerAction, SPlayerPosition, SSetCreativeSlot, SUseItemOn,
 };
+use pumpkin_protocol::ser::NetworkWriteExt;
 use pumpkin_protocol::{ClientPacket, ConnectionState, RawPacket};
 use pumpkin_util::GameMode;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector2::Vector2;
 use pumpkin_util::math::vector3::Vector3;
+use pumpkin_util::version::JavaMinecraftVersion;
 use pumpkin_util::world_seed::Seed;
 use pumpkin_world::chunk::ChunkData;
 use pumpkin_world::world::BlockFlags;
 use tempfile::TempDir;
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 
 /// A running in-memory server plus the temporary world directory backing it.
@@ -99,6 +105,34 @@ impl TestServer {
     #[must_use]
     pub fn world(&self) -> Arc<World> {
         self.server.get_world_from_dimension(&Dimension::OVERWORLD)
+    }
+
+    /// Binds a real loopback TCP listener and drives each accepted Java
+    /// connection through the real handshake/login handling, returning the bound
+    /// address. A [`TestBot`] connects to it to exercise the full socket +
+    /// protocol stack end to end.
+    pub async fn spawn_java_listener(&self) -> SocketAddr {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind java listener");
+        let addr = listener.local_addr().expect("java listener address");
+        let server = self.server.clone();
+        tokio::spawn(async move {
+            let mut next_id = 1000u64;
+            while let Ok((connection, peer)) = listener.accept().await {
+                connection.set_nodelay(true).ok();
+                let server = server.clone();
+                let id = next_id;
+                next_id += 1;
+                tokio::spawn(async move {
+                    let mut java = JavaClient::new(connection, peer, id);
+                    java.start_outgoing_packet_task();
+                    let _ = java.handle_login_sequence(&server).await;
+                    java.await_tasks().await;
+                });
+            }
+        });
+        addr
     }
 
     /// Advances the full server tick (world logic, then player/network flush)
@@ -360,6 +394,60 @@ impl TestPlayer {
             "expected clientbound packet was not among the {} captured frame(s)",
             frames.len()
         );
+    }
+}
+
+/// A minimal headless client that speaks the real Java protocol over TCP,
+/// reusing `pumpkin-protocol`'s framing. Used for end-to-end (L3) tests.
+pub struct TestBot {
+    encoder: TCPNetworkEncoder<OwnedWriteHalf>,
+    decoder: TCPNetworkDecoder<OwnedReadHalf>,
+    version: JavaMinecraftVersion,
+}
+
+impl TestBot {
+    /// Connects to a server address (see [`TestServer::spawn_java_listener`]).
+    pub async fn connect(addr: SocketAddr) -> Self {
+        let stream = TcpStream::connect(addr).await.expect("bot connect");
+        stream.set_nodelay(true).ok();
+        let (read, write) = stream.into_split();
+        Self {
+            encoder: TCPNetworkEncoder::new(write),
+            decoder: TCPNetworkDecoder::new(read),
+            version: CURRENT_MC_VERSION,
+        }
+    }
+
+    /// The protocol version the bot speaks (the server's current version).
+    #[must_use]
+    pub const fn version(&self) -> JavaMinecraftVersion {
+        self.version
+    }
+
+    /// Sends a serverbound packet framed with an explicit packet id. Use this
+    /// for the handshake, which the server handles state-independently at a
+    /// literal id 0 and which has no entry in the versioned packet map.
+    pub async fn send_raw<P: ClientPacket>(&mut self, id: i32, packet: &P) {
+        let mut body = Vec::new();
+        body.write_var_int(&VarInt(id)).expect("write packet id");
+        packet
+            .write_packet_data(&mut body, &self.version)
+            .expect("write packet body");
+        self.encoder
+            .write_packet(body.into())
+            .await
+            .expect("send frame");
+        self.encoder.flush().await.expect("flush frame");
+    }
+
+    /// Encodes a serverbound packet with its versioned id and sends it framed.
+    pub async fn send<P: ClientPacket>(&mut self, packet: &P) {
+        self.send_raw(P::to_id(self.version), packet).await;
+    }
+
+    /// Reads the next clientbound frame as a raw `{ id, payload }` packet.
+    pub async fn recv(&mut self) -> RawPacket {
+        self.decoder.get_raw_packet().await.expect("receive frame")
     }
 }
 

@@ -19,7 +19,7 @@ pumpkin-world = { workspace = true, features = ["test-harness"] }
 arc-swap.workspace = true
 bytes.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["net", "sync"] }
+tokio = { workspace = true, features = ["net", "sync", "rt"] }
 
 [dev-dependencies]
 pumpkin-test-macros.workspace = true
