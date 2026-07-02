@@ -162,7 +162,7 @@ use weather::Weather;
 
 type FlowingFluidProperties = pumpkin_data::fluid::FlowingWaterLikeFluidProperties;
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
 
 impl PumpkinError for GetBlockError {
     fn is_kick(&self) -> bool {
@@ -222,9 +222,7 @@ pub struct World {
     pub dragon_fight: Option<Mutex<dragon_fight::DragonFight>>,
     pub spawn_state: ArcSwap<SpawnState>,
     pub active_chunks: ArcSwap<FxHashSet<Vector2<i32>>>,
-    /// Block entities indexed by chunk, so ticking only visits the currently
-    /// active chunks instead of scanning every loaded block entity each tick.
-    pub block_entities: DashMap<Vector2<i32>, FxHashMap<BlockPos, Arc<dyn BlockEntity>>>,
+    pub block_entities: DashMap<BlockPos, Arc<dyn BlockEntity>>,
 }
 
 impl PartialEq for World {
@@ -967,12 +965,12 @@ impl World {
         };
 
         let active_chunks = self.active_chunks.load();
-        let mut block_entities: Vec<Arc<dyn BlockEntity>> = Vec::new();
-        for chunk_pos in active_chunks.iter() {
-            if let Some(chunk_block_entities) = self.block_entities.get(chunk_pos) {
-                block_entities.extend(chunk_block_entities.values().cloned());
-            }
-        }
+        let block_entities: Vec<Arc<dyn BlockEntity>> = self
+            .block_entities
+            .iter()
+            .filter(|e| active_chunks.contains(&e.key().chunk_position()))
+            .map(|e| e.value().clone())
+            .collect();
         let block_entity_count = block_entities.len();
 
         let world_for_be = self.clone();
@@ -4163,9 +4161,8 @@ impl World {
             self.spawn_state.load().remove_entity(self, entity.as_ref());
         }
 
-        for chunk_pos in &chunks_set {
-            self.block_entities.remove(chunk_pos);
-        }
+        self.block_entities
+            .retain(|pos, _| !chunks_set.contains(&pos.chunk_position()));
     }
 
     pub async fn set_block_breaking(&self, from: &Entity, location: BlockPos, progress: i32) {
@@ -4928,16 +4925,13 @@ impl World {
     }
 
     pub fn get_block_entity(&self, block_pos: &BlockPos) -> Option<Arc<dyn BlockEntity>> {
-        let chunk_pos = block_pos.chunk_position();
-        if let Some(chunk_block_entities) = self.block_entities.get(&chunk_pos)
-            && let Some(entity) = chunk_block_entities.get(block_pos)
-        {
-            return Some(entity.clone());
+        if let Some(entry) = self.block_entities.get(block_pos) {
+            return Some(entry.value().clone());
         }
 
         let nbt = self
             .level
-            .read_chunk_sync(&chunk_pos, |chunk| {
+            .read_chunk_sync(&block_pos.chunk_position(), |chunk| {
                 chunk
                     .pending_block_entities
                     .lock()
@@ -4946,10 +4940,7 @@ impl World {
             })
             .flatten()?;
         let entity = block_entity_from_nbt(&nbt)?;
-        self.block_entities
-            .entry(chunk_pos)
-            .or_default()
-            .insert(*block_pos, entity.clone());
+        self.block_entities.insert(*block_pos, entity.clone());
         Some(entity)
     }
 
@@ -4971,10 +4962,7 @@ impl World {
             );
         }
 
-        self.block_entities
-            .entry(chunk_pos)
-            .or_default()
-            .insert(block_pos, block_entity);
+        self.block_entities.insert(block_pos, block_entity);
         self.level.read_chunk_sync(&chunk_pos, |chunk| {
             chunk.mark_dirty(true);
         });
@@ -4993,20 +4981,11 @@ impl World {
     }
 
     pub fn remove_block_entity(&self, block_pos: &BlockPos) {
-        let chunk_pos = block_pos.chunk_position();
-        let removed =
-            self.block_entities
-                .get_mut(&chunk_pos)
-                .is_some_and(|mut chunk_block_entities| {
-                    chunk_block_entities.remove(block_pos).is_some()
+        if self.block_entities.remove(block_pos).is_some() {
+            self.level
+                .read_chunk_sync(&block_pos.chunk_position(), |chunk| {
+                    chunk.mark_dirty(true);
                 });
-        if removed {
-            // Drop the chunk's map once its last block entity is gone.
-            self.block_entities
-                .remove_if(&chunk_pos, |_, entities| entities.is_empty());
-            self.level.read_chunk_sync(&chunk_pos, |chunk| {
-                chunk.mark_dirty(true);
-            });
         }
     }
 
