@@ -13,7 +13,7 @@ workspace = true
 pumpkin = { workspace = true, features = ["test-harness"] }
 pumpkin-config.workspace = true
 pumpkin-data.workspace = true
-pumpkin-protocol.workspace = true
+pumpkin-protocol = { workspace = true, features = ["test-harness"] }
 pumpkin-util.workspace = true
 pumpkin-world = { workspace = true, features = ["test-harness"] }
 arc-swap.workspace = true

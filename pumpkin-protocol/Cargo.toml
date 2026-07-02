@@ -10,6 +10,8 @@ default = ["query"]
 serverbound = []
 clientbound = []
 query = []
+# Adds encode derives to serverbound packets so tests can send them as bytes. Off in normal builds.
+test-harness = []
 
 [dependencies]
 pumpkin-nbt.workspace = true

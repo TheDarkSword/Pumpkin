@@ -5,6 +5,7 @@ use pumpkin_util::math::position::BlockPos;
 use crate::VarInt;
 
 #[derive(serde::Deserialize)]
+#[cfg_attr(feature = "test-harness", derive(serde::Serialize))]
 #[java_packet(PLAY_PLAYER_ACTION)]
 pub struct SPlayerAction {
     pub status: VarInt,

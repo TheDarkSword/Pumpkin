@@ -1157,47 +1157,74 @@ impl JavaClient {
     }
 }
 
+/// Captures the clientbound frames a test client would have received.
+///
+/// High-priority (`send_packet_now`) frames are drained by a background task
+/// that also resolves their completion so `send_packet_now` doesn't block;
+/// normal (`enqueue_packet`) frames are drained on demand. [`Self::drain`]
+/// returns everything queued so far, in send order.
+#[cfg(feature = "test-harness")]
+pub struct ClientboundCapture {
+    normal: std::sync::Mutex<Receiver<OutgoingPacket>>,
+    priority: Arc<std::sync::Mutex<Vec<Bytes>>>,
+}
+
+#[cfg(feature = "test-harness")]
+impl ClientboundCapture {
+    /// Returns and clears the raw clientbound frames captured so far.
+    #[must_use]
+    pub fn drain(&self) -> Vec<Bytes> {
+        let mut frames = std::mem::take(&mut *self.priority.lock().unwrap());
+        let mut normal = self.normal.lock().unwrap();
+        while let Ok(packet) = normal.try_recv() {
+            frames.push(packet.data);
+        }
+        frames
+    }
+}
+
 #[cfg(feature = "test-harness")]
 impl JavaClient {
     /// Test-only replacement for [`Self::start_outgoing_packet_task`].
     ///
-    /// Drains both outgoing packet queues into the returned channel, yielding the
-    /// raw serialized clientbound frames instead of writing them to a socket, and
-    /// resolves the completion signal of high-priority sends so that
-    /// `send_packet_now` does not block. Call once, before the client is shared,
-    /// in place of `start_outgoing_packet_task`.
+    /// Instead of writing to a socket it captures clientbound frames. A
+    /// background task drains the high-priority queue (resolving each send's
+    /// completion so `send_packet_now` doesn't block); the normal queue is
+    /// drained synchronously by [`ClientboundCapture::drain`]. This split keeps
+    /// capture deterministic without depending on task scheduling. Call once,
+    /// before the client is shared, in place of `start_outgoing_packet_task`.
     #[must_use]
-    pub fn start_test_capture(&mut self) -> tokio::sync::mpsc::UnboundedReceiver<Bytes> {
-        let mut packet_receiver = self
+    pub fn start_test_capture(&mut self) -> ClientboundCapture {
+        let normal = self
             .outgoing_packet_queue_recv
             .take()
             .expect("This was set in the new fn");
-        let mut priority_packet_receiver = self
+        let mut priority = self
             .outgoing_packet_priority_recv
             .take()
             .expect("This was set in the new fn");
         let close_token = self.close_token.clone();
-        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let buffer = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let task_buffer = buffer.clone();
         self.spawn_task(async move {
             loop {
-                let recv_result = tokio::select! {
+                let packet = tokio::select! {
                     biased;
-                    () = close_token.cancelled() => None,
-                    res = priority_packet_receiver.recv() => res,
-                    res = packet_receiver.recv() => res,
+                    () = close_token.cancelled() => break,
+                    res = priority.recv() => res,
                 };
-
-                let Some(packet) = recv_result else {
+                let Some(packet) = packet else {
                     break;
                 };
-
-                // Forward the serialized clientbound frame to the test sink.
-                let _ = sender.send(packet.data);
+                task_buffer.lock().unwrap().push(packet.data);
                 if let Some(completion) = packet.completion {
                     let _ = completion.send(());
                 }
             }
         });
-        receiver
+        ClientboundCapture {
+            normal: std::sync::Mutex::new(normal),
+            priority: buffer,
+        }
     }
 }

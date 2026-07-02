@@ -18,7 +18,7 @@ use pumpkin::data::VanillaData;
 use pumpkin::entity::EntityBase;
 use pumpkin::entity::item::ItemEntity;
 use pumpkin::entity::player::Player;
-use pumpkin::net::java::JavaClient;
+use pumpkin::net::java::{ClientboundCapture, JavaClient};
 use pumpkin::net::{ClientPlatform, GameProfile, PlayerConfig, offline_uuid};
 use pumpkin::server::Server;
 use pumpkin::world::World;
@@ -29,12 +29,12 @@ use pumpkin_data::Block;
 use pumpkin_data::dimension::Dimension;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
-use pumpkin_protocol::ConnectionState;
 use pumpkin_protocol::codec::item_stack_seralizer::ItemStackSerializer;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::server::play::{
     SPlayerAction, SPlayerPosition, SSetCreativeSlot, SUseItemOn,
 };
+use pumpkin_protocol::{ClientPacket, ConnectionState, RawPacket};
 use pumpkin_util::GameMode;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector2::Vector2;
@@ -44,7 +44,6 @@ use pumpkin_world::chunk::ChunkData;
 use pumpkin_world::world::BlockFlags;
 use tempfile::TempDir;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc::UnboundedReceiver;
 
 /// A running in-memory server plus the temporary world directory backing it.
 pub struct TestServer {
@@ -212,8 +211,8 @@ pub struct TestPlayer {
     pub player: Arc<Player>,
     /// The server the player belongs to (needed to invoke real handlers).
     server: Arc<Server>,
-    /// Raw serialized clientbound frames the server tried to send this player.
-    pub clientbound: UnboundedReceiver<Bytes>,
+    /// Captures the clientbound frames the server queued for this player.
+    clientbound: ClientboundCapture,
     /// The client end of the loopback socket, kept open for the connection's life.
     _client_stream: TcpStream,
 }
@@ -294,6 +293,50 @@ impl TestPlayer {
             .handle_set_creative_slot(&self.player, packet)
             .await
             .expect("creative slot set");
+    }
+
+    /// Encodes `packet` and feeds it through the real serverbound byte pipeline
+    /// (`handle_play_packet`), so the actual decode and dispatch run — unlike the
+    /// typed action helpers above, which call the handlers directly. The packet
+    /// must be encodable (a `ClientPacket`, i.e. it derives `Serialize`).
+    pub async fn send_serverbound<P: ClientPacket>(&self, packet: &P) {
+        let version = self.client().version.load();
+        let mut body = Vec::new();
+        packet
+            .write_packet_data(&mut body, &version)
+            .expect("encode serverbound packet");
+        let raw = RawPacket {
+            id: P::to_id(version),
+            payload: body.into(),
+        };
+        if let Err(error) = self
+            .client()
+            .handle_play_packet(&self.player, &self.server, &raw)
+            .await
+        {
+            panic!("handle_play_packet returned an error: {error}");
+        }
+    }
+
+    /// Returns the raw clientbound frames the server has queued for this player
+    /// so far, in send order.
+    #[must_use]
+    pub fn clientbound_frames(&self) -> Vec<Bytes> {
+        self.clientbound.drain()
+    }
+
+    /// Asserts the server sent a clientbound packet byte-identical to `expected`
+    /// (re-serialized with the client's protocol version).
+    pub fn assert_clientbound_sent<P: ClientPacket>(&self, expected: &P) {
+        let version = self.client().version.load();
+        let expected_bytes = JavaClient::serialize_packet_for_version(expected, version)
+            .expect("serialize expected clientbound packet");
+        let frames = self.clientbound_frames();
+        assert!(
+            frames.iter().any(|frame| frame == &expected_bytes),
+            "expected clientbound packet was not among the {} captured frame(s)",
+            frames.len()
+        );
     }
 }
 
