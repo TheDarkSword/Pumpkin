@@ -12,7 +12,7 @@ workspace = true
 [dependencies]
 pumpkin = { workspace = true, features = ["test-harness"] }
 pumpkin-config.workspace = true
-pumpkin-data.workspace = true
+pumpkin-data = { workspace = true, features = ["item", "block", "recipes", "tag"] }
 pumpkin-protocol = { workspace = true, features = ["test-harness"] }
 pumpkin-util.workspace = true
 pumpkin-world = { workspace = true, features = ["test-harness"] }
