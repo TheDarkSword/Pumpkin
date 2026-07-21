@@ -247,63 +247,61 @@ impl DataComponentImpl for EnchantmentGlintOverrideImpl {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct TooltipStyleImpl {
-    pub id: Cow<'static, str>,
+    pub id: String,
 }
 impl TooltipStyleImpl {
     pub fn read_data(data: &NbtTag) -> Option<Self> {
-        data.extract_string().map(|id| Self {
-            id: Cow::Owned(id.to_string()),
-        })
+        data.extract_string().map(|id| Self { id: id.to_string() })
     }
 }
 impl DataComponentImpl for TooltipStyleImpl {
     fn write_data(&self) -> NbtTag {
-        NbtTag::String(self.id.clone().into_owned().into())
+        NbtTag::String(self.id.clone().into())
     }
     fn get_hash(&self) -> i32 {
-        get_str_hash(self.id.as_ref()) as i32
+        get_str_hash(&self.id) as i32
     }
     default_impl!(TooltipStyle);
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct NoteBlockSoundImpl {
-    pub sound: Cow<'static, str>,
+    pub sound: String,
 }
 impl NoteBlockSoundImpl {
     pub fn read_data(data: &NbtTag) -> Option<Self> {
         data.extract_string().map(|sound| Self {
-            sound: Cow::Owned(sound.to_string()),
+            sound: sound.to_string(),
         })
     }
 }
 impl DataComponentImpl for NoteBlockSoundImpl {
     fn write_data(&self) -> NbtTag {
-        NbtTag::String(self.sound.clone().into_owned().into())
+        NbtTag::String(self.sound.clone().into())
     }
     fn get_hash(&self) -> i32 {
-        get_str_hash(self.sound.as_ref()) as i32
+        get_str_hash(&self.sound) as i32
     }
     default_impl!(NoteBlockSound);
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct BaseColorImpl {
-    pub color: Cow<'static, str>,
+    pub color: String,
 }
 impl BaseColorImpl {
     pub fn read_data(data: &NbtTag) -> Option<Self> {
         data.extract_string().map(|color| Self {
-            color: Cow::Owned(color.to_string()),
+            color: color.to_string(),
         })
     }
 }
 impl DataComponentImpl for BaseColorImpl {
     fn write_data(&self) -> NbtTag {
-        NbtTag::String(self.color.clone().into_owned().into())
+        NbtTag::String(self.color.clone().into())
     }
     fn get_hash(&self) -> i32 {
-        get_str_hash(self.color.as_ref()) as i32
+        get_str_hash(&self.color) as i32
     }
     default_impl!(BaseColor);
 }

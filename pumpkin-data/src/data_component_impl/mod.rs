@@ -637,7 +637,7 @@ mod tests {
     fn base_color_round_trip() {
         assert_round_trip(
             BaseColorImpl {
-                color: Cow::Borrowed("light_blue"),
+                color: "light_blue".to_string(),
             },
             BaseColorImpl::read_data,
         );
@@ -647,7 +647,7 @@ mod tests {
     fn note_block_sound_round_trip() {
         assert_round_trip(
             NoteBlockSoundImpl {
-                sound: Cow::Borrowed("minecraft:block.note_block.pling"),
+                sound: "minecraft:block.note_block.pling".to_string(),
             },
             NoteBlockSoundImpl::read_data,
         );
@@ -657,7 +657,7 @@ mod tests {
     fn tooltip_style_round_trip() {
         assert_round_trip(
             TooltipStyleImpl {
-                id: Cow::Borrowed("minecraft:my_style"),
+                id: "minecraft:my_style".to_string(),
             },
             TooltipStyleImpl::read_data,
         );
