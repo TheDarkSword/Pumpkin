@@ -638,70 +638,66 @@ mod tests {
         assert_eq!(MapIdImpl { id: 10 }.get_hash(), -919192125i32);
     }
 
-    #[test]
-    fn max_damage_write_read_round_trip() {
-        let value = MaxDamageImpl { max_damage: 1561 };
-        let read = MaxDamageImpl::read_data(&value.write_data()).unwrap();
-        assert!(value.equal(&read));
-    }
-
-    #[test]
-    fn enchantable_write_read_round_trip() {
-        let value = EnchantableImpl { value: 14 };
-        let read = EnchantableImpl::read_data(&value.write_data()).unwrap();
-        assert!(value.equal(&read));
-    }
-
-    #[test]
-    fn food_write_read_round_trip() {
-        let value = FoodImpl {
-            nutrition: 4,
-            saturation: 2.4,
-            can_always_eat: true,
-        };
-        let read = FoodImpl::read_data(&value.write_data()).unwrap();
-        assert!(value.equal(&read));
-    }
-
-    #[test]
-    fn block_entity_data_write_read_round_trip() {
-        let mut nbt = NbtCompound::new();
-        nbt.put_string("id", "minecraft:chest".to_string());
-        nbt.put_int("x", 12);
-        let value = BlockEntityDataImpl { nbt };
-        let read = BlockEntityDataImpl::read_data(&value.write_data()).unwrap();
-        assert!(value.equal(&read));
-    }
-
-    #[test]
-    fn tool_write_read_round_trip() {
-        let value = ToolImpl {
-            rules: Cow::Owned(vec![
-                ToolRule {
-                    blocks: IDSet::Tag(Cow::Borrowed("mineable/pickaxe")),
-                    speed: Some(6.0),
-                    correct_for_drops: Some(true),
-                },
-                ToolRule {
-                    blocks: IDSet::Tag(Cow::Borrowed("incorrect_for_wooden_tool")),
-                    speed: None,
-                    correct_for_drops: Some(false),
-                },
-            ]),
-            default_mining_speed: 1.0,
-            damage_per_block: 2,
-            can_destroy_blocks_in_creative: false,
-        };
-        let read = ToolImpl::read_data(&value.write_data()).unwrap();
-        assert!(value.equal(&read));
-    }
-
     fn assert_round_trip<T: DataComponentImpl + Clone + 'static>(
         value: T,
         read: impl Fn(&NbtTag) -> Option<T>,
     ) {
         let restored = read(&value.write_data()).expect("read_data returned None");
         assert!(value.equal(&restored));
+    }
+
+    #[test]
+    fn max_damage_round_trip() {
+        assert_round_trip(MaxDamageImpl { max_damage: 1561 }, MaxDamageImpl::read_data);
+    }
+
+    #[test]
+    fn enchantable_round_trip() {
+        assert_round_trip(EnchantableImpl { value: 14 }, EnchantableImpl::read_data);
+    }
+
+    #[test]
+    fn food_round_trip() {
+        assert_round_trip(
+            FoodImpl {
+                nutrition: 4,
+                saturation: 2.4,
+                can_always_eat: true,
+            },
+            FoodImpl::read_data,
+        );
+    }
+
+    #[test]
+    fn block_entity_data_round_trip() {
+        let mut nbt = NbtCompound::new();
+        nbt.put_string("id", "minecraft:chest".to_string());
+        nbt.put_int("x", 12);
+        assert_round_trip(BlockEntityDataImpl { nbt }, BlockEntityDataImpl::read_data);
+    }
+
+    #[test]
+    fn tool_round_trip() {
+        assert_round_trip(
+            ToolImpl {
+                rules: Cow::Owned(vec![
+                    ToolRule {
+                        blocks: IDSet::Tag(Cow::Borrowed("mineable/pickaxe")),
+                        speed: Some(6.0),
+                        correct_for_drops: Some(true),
+                    },
+                    ToolRule {
+                        blocks: IDSet::Tag(Cow::Borrowed("incorrect_for_wooden_tool")),
+                        speed: None,
+                        correct_for_drops: Some(false),
+                    },
+                ]),
+                default_mining_speed: 1.0,
+                damage_per_block: 2,
+                can_destroy_blocks_in_creative: false,
+            },
+            ToolImpl::read_data,
+        );
     }
 
     #[test]
