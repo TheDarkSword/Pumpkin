@@ -128,7 +128,7 @@ impl Goal for OfferFlowerGoal {
                     .has_tag(&tag::EntityType::MINECRAFT_ACCEPTS_IRON_GOLEM_GIFT)
                     && bb.intersects(&target_entity.bounding_box.load())
                 {
-                    // Target accepted gift
+                    // TODO: hand the poppy over once mobs can hold equipment gifts.
                 }
             }
         }

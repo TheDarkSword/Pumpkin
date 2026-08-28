@@ -1,6 +1,6 @@
+use crate::entity::ai::util::RandomExt;
 use pumpkin_protocol::java::client::play::CWorldEvent;
 use pumpkin_util::math::vector3::Vector3;
-use rand::RngExt;
 use std::sync::Arc;
 
 use crate::entity::{
@@ -152,10 +152,6 @@ impl Goal for BlazeShootFireballGoal {
     }
 }
 
-fn triangle(rng: &mut impl RngExt, center: f64, spread: f64) -> f64 {
-    spread.mul_add(rng.random::<f64>() - rng.random::<f64>(), center)
-}
-
 /// One fireball, aimed with a triangular spread that widens with the distance.
 fn shoot_fireball(blaze: &Entity, dx: f64, yd: f64, dz: f64, distance_sq: f64) {
     let spread = 2.297 * distance_sq.sqrt().sqrt() * 0.5;
@@ -168,11 +164,7 @@ fn shoot_fireball(blaze: &Entity, dx: f64, yd: f64, dz: f64, distance_sq: f64) {
 
     let direction = {
         let mut rng = rand::rng();
-        Vector3::new(
-            triangle(&mut rng, dx, spread),
-            yd,
-            triangle(&mut rng, dz, spread),
-        )
+        Vector3::new(rng.triangle(dx, spread), yd, rng.triangle(dz, spread))
     };
 
     let blaze_pos = blaze.pos.load();

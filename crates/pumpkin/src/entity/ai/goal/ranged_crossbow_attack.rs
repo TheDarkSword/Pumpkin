@@ -172,7 +172,7 @@ impl Goal for RangedCrossbowAttackGoal {
         let target_pos = target.get_entity().pos.load();
         let distance_sq = mob_pos.squared_distance_to_vec(&target_pos);
 
-        let has_line_of_sight = true; // In future: raycast check
+        let has_line_of_sight = mob.get_entity().has_line_of_sight(target.get_entity());
         if has_line_of_sight {
             self.see_time += 1;
         } else {
