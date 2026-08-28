@@ -3202,6 +3202,22 @@ impl Entity {
         )
     }
 
+    /// No solid block between the two eye positions.
+    #[must_use]
+    pub fn has_line_of_sight(&self, other: &Self) -> bool {
+        let from = self.get_eye_pos();
+        let to = other.get_eye_pos();
+        if from.squared_distance_to_vec(&to) > 128.0 * 128.0 {
+            return false;
+        }
+        self.world
+            .load_full()
+            .raycast(from, to, |block_pos, world| {
+                world.get_block_state(block_pos).is_solid()
+            })
+            .is_none()
+    }
+
     pub fn get_eye_y(&self) -> f64 {
         self.pos.load().y + f64::from(self.entity_dimension.load().eye_height)
     }

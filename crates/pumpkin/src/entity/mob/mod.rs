@@ -611,6 +611,8 @@ pub trait Mob: EntityBase + Send + Sync {
         None
     }
 
+    fn clear_trading_player(&self) {}
+
     fn get_home(&self) -> Option<BlockPos> {
         None
     }

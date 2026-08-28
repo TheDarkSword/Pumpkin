@@ -168,7 +168,7 @@ impl WanderingTraderEntity {
             );
 
             // Priority 1: TradeWithPlayerGoal
-            goal_selector.add_goal(1, Box::new(TradeWithPlayerGoal::new(0.5)));
+            goal_selector.add_goal(1, Box::new(TradeWithPlayerGoal::new()));
 
             // Priority 1: AvoidEntityGoals
             goal_selector.add_goal(
@@ -586,6 +586,13 @@ impl AgeableMob for WanderingTraderEntity {
 impl Mob for WanderingTraderEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    fn clear_trading_player(&self) {
+        *self
+            .trading_player
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
 
     fn get_trading_player(&self) -> Option<Arc<Player>> {

@@ -149,14 +149,10 @@ impl Goal for TrackTargetGoal {
         }
 
         if self.check_visibility {
-            let world = mob_entity.living_entity.entity.world.load();
-            let has_line_of_sight = world
-                .raycast(
-                    mob_entity.living_entity.entity.get_eye_pos(),
-                    target.entity.get_eye_pos(),
-                    |block_pos, world| world.get_block_state(block_pos).is_solid(),
-                )
-                .is_none();
+            let has_line_of_sight = mob_entity
+                .living_entity
+                .entity
+                .has_line_of_sight(&target.entity);
 
             if !self.remembers_visible_target(has_line_of_sight) {
                 return false;

@@ -137,18 +137,7 @@ impl TargetPredicate {
             }
         }
 
-        if self.respects_visibility
-            && tester
-                .get_entity()
-                .world
-                .load_full()
-                .raycast(
-                    tester.get_entity().get_eye_pos(),
-                    target.get_entity().get_eye_pos(),
-                    |block_pos, world| world.get_block_state(block_pos).is_solid(),
-                )
-                .is_some()
-        {
+        if self.respects_visibility && !tester.get_entity().has_line_of_sight(target.get_entity()) {
             return false;
         }
 

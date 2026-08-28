@@ -3,9 +3,10 @@ use crate::entity::ai::goal::ParentHandle;
 use crate::entity::ai::goal::move_to_target_pos::{MoveToTargetPos, MoveToTargetPosGoal};
 use crate::entity::mob::Mob;
 use crate::world::World;
-use pumpkin_data::Block;
+use pumpkin_data::{Block, BlockStateId};
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
+use pumpkin_world::world::BlockFlags;
 use std::sync::Arc;
 
 const MAX_COOLDOWN: i32 = 20;
@@ -150,9 +151,14 @@ impl<S: Stepping + Send + Sync, M: MoveToTargetPos + Send + Sync> Goal
         }
 
         if counter > 60 {
-            // TODO: world.removeBlock HOW?
-            // TODO: spawn particles
-            self.on_destroy_block(world, tweak_pos);
+            // Replace with air, no drops.
+            world.set_block_state(&tweak_pos, BlockStateId::AIR, BlockFlags::NOTIFY_ALL);
+            // TODO: spawn the poof particles
+            if let Some(stepping) = self.stepping.get() {
+                stepping.on_destroy_block(world, tweak_pos);
+            } else {
+                self.on_destroy_block(world, tweak_pos);
+            }
         }
 
         self.counter += 1;
