@@ -5954,25 +5954,17 @@ impl World {
         Some((t_hit, direction, hit_pos))
     }
 
-    pub fn ray_outline_check_detailed(
-        &self,
+    /// Clips the segment against the outline shapes of `state`. A shapeless block,
+    /// air above all, cannot be hit.
+    fn clip_outline_shapes(
+        state: &BlockState,
         block_pos: &BlockPos,
         from: Vector3<f64>,
         to: Vector3<f64>,
     ) -> Option<(BlockDirection, Vector3<f64>)> {
-        let state = self.get_block_state(block_pos);
-
-        if state.outline_shapes.is_empty() {
-            let block_min = block_pos.0.to_f64();
-            let block_max = block_min.add_raw(1.0, 1.0, 1.0);
-            return Self::intersects_aabb_with_hit(from, to, block_min, block_max)
-                .map(|(_, dir, hit_pos)| (dir, hit_pos));
-        }
-
-        let bounding_boxes = state.get_block_outline_shapes_at(block_pos);
         let mut closest_hit: Option<(f64, BlockDirection, Vector3<f64>)> = None;
 
-        for shape in bounding_boxes {
+        for shape in state.get_block_outline_shapes_at(block_pos) {
             let world_min = shape.min.add(&block_pos.0.to_f64());
             let world_max = shape.max.add(&block_pos.0.to_f64());
 
@@ -5987,6 +5979,15 @@ impl World {
         }
 
         closest_hit.map(|(_, dir, hit_pos)| (dir, hit_pos))
+    }
+
+    pub fn ray_outline_check_detailed(
+        &self,
+        block_pos: &BlockPos,
+        from: Vector3<f64>,
+        to: Vector3<f64>,
+    ) -> Option<(BlockDirection, Vector3<f64>)> {
+        Self::clip_outline_shapes(self.get_block_state(block_pos), block_pos, from, to)
     }
 
     fn ray_outline_check(
@@ -6852,6 +6853,22 @@ mod tests {
     use pumpkin_util::math::position::BlockPos;
 
     use super::{bedrock_block_breaking_rate, bedrock_chest_block_actor};
+
+    #[test]
+    fn a_shapeless_block_never_stops_a_ray() {
+        // The ray always starts inside a block, usually air, and that block must not
+        // count as a hit or every raycast would stop where it began.
+        let pos = BlockPos::new(10, 64, 10);
+        let from = pumpkin_util::math::vector3::Vector3::new(10.5, 64.5, 10.5);
+        let to = pumpkin_util::math::vector3::Vector3::new(20.5, 64.5, 10.5);
+
+        assert!(
+            super::World::clip_outline_shapes(Block::AIR.default_state, &pos, from, to).is_none()
+        );
+        assert!(
+            super::World::clip_outline_shapes(Block::STONE.default_state, &pos, from, to).is_some()
+        );
+    }
 
     #[test]
     fn bedrock_block_breaking_rate_uses_progress_per_tick() {
