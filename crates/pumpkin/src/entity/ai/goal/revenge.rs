@@ -50,13 +50,9 @@ impl Goal for RevengeGoal {
             return false;
         };
 
-        let Some(attacker_living) = attacker.get_living_entity() else {
-            return false;
-        };
-
         if !self
-            .target_predicate
-            .test(&world, Some(&mob_entity.living_entity), attacker_living)
+            .track_target_goal
+            .can_track(mob, Some(attacker.as_ref()), &self.target_predicate)
         {
             return false;
         }
@@ -65,7 +61,7 @@ impl Goal for RevengeGoal {
         true
     }
 
-    fn should_continue(&self, mob: &dyn Mob) -> bool {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         self.track_target_goal.should_continue(mob)
     }
 
@@ -73,6 +69,7 @@ impl Goal for RevengeGoal {
         mob.set_mob_target(self.target.clone());
 
         let mob_entity = mob.get_mob_entity();
+        self.track_target_goal.set_target_mob(self.target.clone());
         self.last_attacked_time = mob_entity.living_entity.last_attacked_time.load(Relaxed);
         self.track_target_goal.max_time_without_visibility = 300;
 

@@ -61,7 +61,7 @@ impl Goal for ChasePlayerGoal {
         false
     }
 
-    fn should_continue(&self, mob: &dyn Mob) -> bool {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         let Some(player) = &self.target else {
             return false;
         };

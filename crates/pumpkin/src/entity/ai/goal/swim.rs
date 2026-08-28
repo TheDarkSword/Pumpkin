@@ -31,7 +31,7 @@ impl Goal for SwimGoal {
         Self::is_in_fluid(mob)
     }
 
-    fn should_continue(&self, mob: &dyn Mob) -> bool {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         Self::is_in_fluid(mob)
     }
 

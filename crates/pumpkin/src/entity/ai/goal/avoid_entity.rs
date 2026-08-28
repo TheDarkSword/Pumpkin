@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use super::{Controls, Goal};
+use crate::entity::predicate::EntityPredicate;
 use crate::entity::{EntityBase, ai::pathfinder::NavigatorGoal, mob::Mob};
 use pumpkin_data::entity::EntityType;
 use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
@@ -46,10 +47,14 @@ impl AvoidEntityGoal {
 
         if self.flee_type == &EntityType::PLAYER {
             world
-                .get_closest_player(pos, self.flee_distance)
+                .get_nearest_player(pos, self.flee_distance, |player| {
+                    EntityPredicate::ExceptCreativeOrSpectator.test(player.get_entity())
+                })
                 .map(|p| p as Arc<dyn EntityBase>)
         } else {
-            world.get_closest_entity(pos, self.flee_distance, Some(&[self.flee_type]))
+            world.get_nearest_entity(pos, self.flee_distance, Some(&[self.flee_type]), |entity| {
+                EntityPredicate::ExceptCreativeOrSpectator.test(entity.get_entity())
+            })
         }
     }
 
@@ -144,7 +149,7 @@ impl Goal for AvoidEntityGoal {
         true
     }
 
-    fn should_continue(&self, mob: &dyn Mob) -> bool {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         let navigator = mob
             .get_mob_entity()
             .navigator
@@ -182,10 +187,6 @@ impl Goal for AvoidEntityGoal {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             navigator.set_speed(speed);
         }
-    }
-
-    fn should_run_every_tick(&self) -> bool {
-        true
     }
 
     fn stop(&mut self, _mob: &dyn Mob) {

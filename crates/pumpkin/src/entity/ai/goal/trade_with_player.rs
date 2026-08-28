@@ -83,7 +83,7 @@ impl Goal for TradeWithPlayerGoal {
         self.player.is_some()
     }
 
-    fn should_continue(&self, mob: &dyn Mob) -> bool {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         let Some(current) = Self::trading_player_in_range(mob) else {
             return false;
         };

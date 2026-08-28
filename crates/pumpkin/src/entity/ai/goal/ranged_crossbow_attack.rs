@@ -132,7 +132,7 @@ impl Goal for RangedCrossbowAttackGoal {
         Self::is_holding_crossbow(mob)
     }
 
-    fn should_continue(&self, mob: &dyn Mob) -> bool {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         let target = mob.get_mob_entity().get_target().clone();
         let Some(target) = target else {
             return false;

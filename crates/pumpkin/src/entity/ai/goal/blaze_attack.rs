@@ -49,7 +49,7 @@ impl Goal for BlazeShootFireballGoal {
         }
     }
 
-    fn should_continue(&self, _mob: &dyn Mob) -> bool {
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
         let Some(blaze) = self.blaze.upgrade() else {
             return false;
         };

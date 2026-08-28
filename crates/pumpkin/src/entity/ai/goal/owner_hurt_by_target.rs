@@ -63,7 +63,7 @@ impl Goal for OwnerHurtByTargetGoal {
         true
     }
 
-    fn should_continue(&self, mob: &dyn Mob) -> bool {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         let target = mob.get_mob_entity().get_target();
         let Some(t) = target.as_ref() else {
             return false;

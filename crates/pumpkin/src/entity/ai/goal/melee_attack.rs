@@ -66,7 +66,7 @@ impl Goal for MeleeAttackGoal {
         true //TODO: modify that because if a path to the target not exists then call mob.is_in_attack_range(target)
     }
 
-    fn should_continue(&self, mob: &dyn Mob) -> bool {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         let target = mob.get_mob_entity().get_target().clone();
 
         let Some(target) = target else {

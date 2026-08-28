@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::{Controls, Goal};
+use super::{Controls, Goal, to_goal_ticks};
 use crate::entity::EntityBase;
 use crate::entity::{ai::pathfinder::NavigatorGoal, mob::Mob, player::Player};
 use pumpkin_data::item::Item;
@@ -72,7 +72,7 @@ impl Goal for TemptGoal {
         self.target_player.is_some()
     }
 
-    fn should_continue(&self, mob: &dyn Mob) -> bool {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         self.target_player
             .as_ref()
             .is_some_and(|player| self.is_player_still_tempting(player, mob))
@@ -107,11 +107,7 @@ impl Goal for TemptGoal {
 
     fn stop(&mut self, _mob: &dyn Mob) {
         self.target_player = None;
-        self.cooldown = 100;
-    }
-
-    fn should_run_every_tick(&self) -> bool {
-        true
+        self.cooldown = to_goal_ticks(100);
     }
 
     fn controls(&self) -> Controls {

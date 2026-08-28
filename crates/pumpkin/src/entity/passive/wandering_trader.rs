@@ -852,7 +852,7 @@ impl Goal for LookAtTradingPlayerGoal {
         mob_pos.squared_distance_to_vec(&player_pos) <= self.range * self.range
     }
 
-    fn should_continue(&self, mob: &dyn Mob) -> bool {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         let Some(player) = mob.get_trading_player() else {
             return false;
         };
@@ -932,7 +932,7 @@ impl Goal for WanderToPositionGoal {
         Self::is_too_far_away(&wander_pos, &entity_pos, self.stop_distance)
     }
 
-    fn should_continue(&self, _mob: &dyn Mob) -> bool {
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
         let Some(trader) = self.trader.upgrade() else {
             return false;
         };
@@ -1038,7 +1038,7 @@ impl Goal for MoveTowardsRestrictionGoal {
         mob_entity.has_position_target() && !mob_entity.is_in_position_target_range()
     }
 
-    fn should_continue(&self, mob: &dyn Mob) -> bool {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         let mob_entity = mob.get_mob_entity();
         !mob_entity
             .navigator
@@ -1121,7 +1121,7 @@ impl Goal for WanderingTraderUseItemGoal {
         false
     }
 
-    fn should_continue(&self, _mob: &dyn Mob) -> bool {
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
         let Some(trader) = self.trader.upgrade() else {
             return false;
         };

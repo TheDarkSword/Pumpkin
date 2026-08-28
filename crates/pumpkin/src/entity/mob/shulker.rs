@@ -436,7 +436,7 @@ impl Goal for ShulkerAttackGoal {
             .is_some_and(|t| t.get_living_entity().is_some_and(|l| l.entity.is_alive()))
     }
 
-    fn should_continue(&self, mob: &dyn Mob) -> bool {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         let target = mob.get_mob_entity().get_target();
         target
             .as_ref()
@@ -538,7 +538,7 @@ impl Goal for ShulkerPeekGoal {
         self.shulker.can_stay_at(&pos, face)
     }
 
-    fn should_continue(&self, mob: &dyn Mob) -> bool {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         let has_target = mob.get_mob_entity().get_target().is_some();
         !has_target && self.peek_time.load(Ordering::Relaxed) > 0
     }

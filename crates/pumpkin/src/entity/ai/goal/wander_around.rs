@@ -47,7 +47,7 @@ impl Goal for WanderAroundGoal {
         true
     }
 
-    fn should_continue(&self, mob: &dyn Mob) -> bool {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         let navigator = mob
             .get_mob_entity()
             .navigator

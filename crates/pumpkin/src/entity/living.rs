@@ -9,6 +9,7 @@ use pumpkin_inventory::screen_handler::InventoryPlayer;
 use pumpkin_protocol::bedrock::client::take_item_actor::CTakeItemActor;
 use pumpkin_protocol::bedrock::server::actor_event::{ActorEventID, SActorEvent};
 use pumpkin_protocol::codec::var_ulong::VarULong;
+use pumpkin_util::Difficulty;
 use pumpkin_util::GameMode;
 use pumpkin_util::Hand;
 use pumpkin_util::math::position::BlockPos;
@@ -2015,6 +2016,19 @@ impl LivingEntity {
 
     pub fn is_part_of_game(&self) -> bool {
         !self.is_spectator() && self.entity.is_alive()
+    }
+
+    /// Every caller here is a mob, so the ghast exclusion lives with the rest of the rule.
+    pub fn can_attack(&self, target: &Self) -> bool {
+        if target.entity.entity_type == &EntityType::GHAST {
+            return false;
+        }
+        if target.entity.entity_type == &EntityType::PLAYER
+            && self.entity.world.load().level_info.load().difficulty == Difficulty::Peaceful
+        {
+            return false;
+        }
+        target.can_take_damage()
     }
 
     pub fn reset_state(&self) {

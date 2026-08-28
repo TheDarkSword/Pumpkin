@@ -93,8 +93,4 @@ impl Goal for PickUpBlockGoal {
         world.set_block_state(&target_pos, BlockStateId::AIR, BlockFlags::NOTIFY_ALL);
         self.enderman.set_carried_block(Some(default_state_id));
     }
-
-    fn should_continue(&self, _mob: &dyn Mob) -> bool {
-        false
-    }
 }

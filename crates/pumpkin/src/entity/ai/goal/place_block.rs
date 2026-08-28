@@ -74,8 +74,4 @@ impl Goal for PlaceBlockGoal {
         world_clone.set_block_state(&target_pos, block_state_id, BlockFlags::NOTIFY_ALL);
         self.enderman.set_carried_block(None);
     }
-
-    fn should_continue(&self, _mob: &dyn Mob) -> bool {
-        false
-    }
 }

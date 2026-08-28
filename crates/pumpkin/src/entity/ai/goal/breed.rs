@@ -114,7 +114,7 @@ impl Goal for BreedGoal {
         self.mate.is_some()
     }
 
-    fn should_continue(&self, _mob: &dyn Mob) -> bool {
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
         let Some(mate) = &self.mate else {
             return false;
         };
@@ -170,13 +170,9 @@ impl Goal for BreedGoal {
 
         self.timer += 1;
 
-        if self.timer >= 60 && dist_sq < 9.0 {
+        if self.timer >= self.get_tick_count(60) && dist_sq < 9.0 {
             Self::breed(mob, mate.as_ref());
         }
-    }
-
-    fn should_run_every_tick(&self) -> bool {
-        true
     }
 
     fn controls(&self) -> Controls {

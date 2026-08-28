@@ -30,7 +30,7 @@ impl Goal for OpenDoorGoal {
         self.door_interact_goal.can_use(mob)
     }
 
-    fn should_continue(&self, _mob: &dyn Mob) -> bool {
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
         self.close_door && self.forget_time > 0 && self.door_interact_goal.can_continue_to_use()
     }
 

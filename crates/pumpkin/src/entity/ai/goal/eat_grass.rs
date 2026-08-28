@@ -1,11 +1,15 @@
 use super::{Controls, Goal};
+use crate::entity::ageable::AgeableMob;
 use crate::entity::mob::Mob;
 use pumpkin_data::Block;
+use pumpkin_data::entity::EntityStatus;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_world::world::BlockFlags;
 use rand::RngExt;
 
 const MAX_TIMER: i32 = 40;
+const MAX_INTERVAL: i32 = 1000;
+const BABY_INTERVAL: i32 = 50;
 
 pub struct EatGrassGoal {
     goal_control: Controls,
@@ -30,7 +34,12 @@ impl EatGrassGoal {
 
 impl Goal for EatGrassGoal {
     fn can_start(&mut self, mob: &dyn Mob) -> bool {
-        if mob.get_random().random_range(0..1000) != 0 {
+        let interval = self.get_tick_count(if mob.as_ageable().is_some_and(AgeableMob::is_baby) {
+            BABY_INTERVAL
+        } else {
+            MAX_INTERVAL
+        });
+        if mob.get_random().random_range(0..interval) != 0 {
             return false;
         }
 
@@ -47,12 +56,17 @@ impl Goal for EatGrassGoal {
         block_below.id == Block::GRASS_BLOCK.id
     }
 
-    fn should_continue(&self, _mob: &dyn Mob) -> bool {
+    fn should_continue(&mut self, _mob: &dyn Mob) -> bool {
         self.timer > 0
     }
 
     fn start(&mut self, mob: &dyn Mob) {
-        self.timer = MAX_TIMER;
+        self.timer = self.get_tick_count(MAX_TIMER);
+        let entity = &mob.get_mob_entity().living_entity.entity;
+        entity
+            .world
+            .load()
+            .send_entity_status(entity, EntityStatus::EatGrass, None);
         let mut navigator = mob
             .get_mob_entity()
             .navigator
@@ -62,9 +76,9 @@ impl Goal for EatGrassGoal {
     }
 
     fn tick(&mut self, mob: &dyn Mob) {
-        self.timer -= 1;
+        self.timer = (self.timer - 1).max(0);
 
-        if self.timer == 4 {
+        if self.timer == self.get_tick_count(4) {
             let entity = &mob.get_mob_entity().living_entity.entity;
             let block_pos = entity.block_pos.load();
             let world = entity.world.load_full();

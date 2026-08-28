@@ -66,7 +66,7 @@ impl Goal for PathfindToRaidGoal {
         !is_village
     }
 
-    fn should_continue(&self, mob: &dyn Mob) -> bool {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         let Some(raider) = mob.as_raider() else {
             return false;
         };
