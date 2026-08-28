@@ -35,15 +35,13 @@ impl Goal for OpenDoorGoal {
     }
 
     fn start(&mut self, mob: &dyn Mob) {
-        self.door_interact_goal.start_interaction(mob);
+        // The crossing direction is deliberately not re-armed, only `forget_time` bounds the goal.
         self.forget_time = 20;
         self.door_interact_goal.set_open(mob, true);
     }
 
     fn stop(&mut self, mob: &dyn Mob) {
-        if self.close_door {
-            self.door_interact_goal.set_open(mob, false);
-        }
+        self.door_interact_goal.set_open(mob, false);
     }
 
     fn tick(&mut self, mob: &dyn Mob) {

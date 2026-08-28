@@ -2,6 +2,10 @@ use std::sync::Arc;
 
 use uuid::Uuid;
 
+use pumpkin_data::entity::EntityStatus;
+use rand::RngExt;
+
+use crate::entity::experience_orb::ExperienceOrbEntity;
 use crate::entity::{EntityBase, ai::pathfinder::NavigatorGoal, mob::Mob, r#type::from_type};
 
 use super::{Controls, Goal};
@@ -100,6 +104,10 @@ impl BreedGoal {
         baby.get_entity().set_age(-24000);
         let world_full = entity.world.load_full();
         world_full.spawn_entity(baby);
+
+        world_full.send_entity_status(entity, EntityStatus::InLoveHearts, None);
+        // TODO: gate on the `animalBreedingDropsXp` game rule once it exists.
+        ExperienceOrbEntity::spawn(&world_full, parent_pos, mob.get_random().random_range(1..8));
     }
 }
 

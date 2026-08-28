@@ -112,8 +112,21 @@ impl<M: MoveToTargetPos> MoveToTargetPosGoal<M> {
         self.trying_time % 40 == 0
     }
 
-    fn start_moving_to_target(_mob: &dyn Mob) {
-        // TODO: implement when navigation is implemented
+    fn start_moving_to_target(&self, mob: &dyn Mob) {
+        let pos = mob.get_entity().pos.load();
+        mob.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .set_progress(NavigatorGoal::new(
+                pos,
+                Vector3::new(
+                    f64::from(self.target_pos.0.x) + 0.5,
+                    f64::from(self.target_pos.0.y + 1),
+                    f64::from(self.target_pos.0.z) + 0.5,
+                ),
+                self.speed,
+            ));
     }
 }
 
@@ -148,22 +161,27 @@ impl<M: MoveToTargetPos> Goal for MoveToTargetPosGoal<M> {
     }
 
     fn start(&mut self, mob: &dyn Mob) {
-        Self::start_moving_to_target(mob);
+        self.start_moving_to_target(mob);
         self.trying_time = 0;
-        let random = mob.get_random().random_range(0..MIN_WAITING_TIME);
-        self.safe_waiting_time =
-            mob.get_random().random_range(random..MIN_WAITING_TIME) + MIN_WAITING_TIME;
+        let bound = mob.get_random().random_range(0..MIN_WAITING_TIME) + MIN_WAITING_TIME;
+        self.safe_waiting_time = mob.get_random().random_range(0..bound) + MIN_WAITING_TIME;
     }
 
     fn tick(&mut self, mob: &dyn Mob) {
         let block_pos = self.get_target_pos();
+        // Measured against the block centre.
+        let block_center = Vector3::new(
+            f64::from(block_pos.0.x) + 0.5,
+            f64::from(block_pos.0.y) + 0.5,
+            f64::from(block_pos.0.z) + 0.5,
+        );
         let block_pos: Vector3<f64> = block_pos.to_f64();
         let Some(move_to_target_pos) = self.move_to_target_pos.get() else {
             return;
         };
         let desired_distance = move_to_target_pos.get_desired_distance_to_target();
 
-        if block_pos.squared_distance_to_vec(&mob.get_entity().pos.load())
+        if block_center.squared_distance_to_vec(&mob.get_entity().pos.load())
             < desired_distance * desired_distance
         {
             self.reached = true;

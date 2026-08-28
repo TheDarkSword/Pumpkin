@@ -4,6 +4,7 @@ use crate::entity::mob::Mob;
 use pumpkin_data::Block;
 use pumpkin_data::entity::EntityStatus;
 use pumpkin_data::tag::{self, Taggable};
+use pumpkin_data::world::WorldEvent;
 use pumpkin_world::world::BlockFlags;
 use rand::RngExt;
 
@@ -83,23 +84,31 @@ impl Goal for EatGrassGoal {
             let block_pos = entity.block_pos.load();
             let world = entity.world.load_full();
 
+            let mob_griefing = world.level_info.load().game_rules.mob_griefing;
+
             let block_at_pos = world.get_block(&block_pos);
             if block_at_pos.has_tag(&tag::Block::MINECRAFT_EDIBLE_FOR_SHEEP) {
-                world.set_block_state(
-                    &block_pos,
-                    Block::AIR.default_state.id,
-                    BlockFlags::NOTIFY_ALL,
-                );
+                if mob_griefing {
+                    // Break effects, no drops.
+                    world.break_block(&block_pos, None, BlockFlags::SKIP_DROPS);
+                }
                 mob.on_eating_grass();
             } else {
                 let below_pos = block_pos.down();
                 let block_below = world.get_block(&below_pos);
                 if block_below.id == Block::GRASS_BLOCK.id {
-                    world.set_block_state(
-                        &below_pos,
-                        Block::DIRT.default_state.id,
-                        BlockFlags::NOTIFY_ALL,
-                    );
+                    if mob_griefing {
+                        world.sync_world_event(
+                            WorldEvent::ParticlesDestroyBlock,
+                            below_pos,
+                            i32::from(Block::GRASS_BLOCK.default_state.id.as_u16()),
+                        );
+                        world.set_block_state(
+                            &below_pos,
+                            Block::DIRT.default_state.id,
+                            BlockFlags::NOTIFY_LISTENERS,
+                        );
+                    }
                     mob.on_eating_grass();
                 }
             }

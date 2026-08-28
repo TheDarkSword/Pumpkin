@@ -27,24 +27,22 @@ impl PathfindToRaidGoal {
     }
 }
 
-impl Goal for PathfindToRaidGoal {
-    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+impl PathfindToRaidGoal {
+    /// An active raid that is still running, with the raider outside a village.
+    fn raid_is_calling(mob: &dyn Mob) -> bool {
         let Some(raider) = mob.as_raider() else {
             return false;
         };
-
-        let target = mob.get_mob_entity().get_target().clone();
-        if target.is_some() || !raider.has_active_raid() {
+        if !raider.has_active_raid() {
             return false;
         }
-
         let Some(raid_id) = raider.get_raider_data().raid_id.load() else {
             return false;
         };
 
         let pos = mob.get_entity().block_pos.load();
         let world = mob.get_entity().world.load();
-        let is_village = {
+        {
             let raids = world
                 .raids
                 .lock()
@@ -55,53 +53,28 @@ impl Goal for PathfindToRaidGoal {
             if raid.is_over() {
                 return false;
             }
-            world
-                .villager_poi
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .get_nearest_job_site(pos, 32)
-                .is_some()
-        };
+        }
 
-        !is_village
+        // TODO: this should count nearby POI sections instead.
+        world
+            .villager_poi
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_nearest_job_site(pos, 32)
+            .is_none()
+    }
+}
+
+impl Goal for PathfindToRaidGoal {
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        mob.get_mob_entity().get_target().is_none()
+            && !mob.get_entity().has_passengers()
+            && Self::raid_is_calling(mob)
     }
 
     fn should_continue(&mut self, mob: &dyn Mob) -> bool {
-        let Some(raider) = mob.as_raider() else {
-            return false;
-        };
-
-        let target = mob.get_mob_entity().get_target().clone();
-        if target.is_some() || !raider.has_active_raid() {
-            return false;
-        }
-
-        let Some(raid_id) = raider.get_raider_data().raid_id.load() else {
-            return false;
-        };
-
-        let pos = mob.get_entity().block_pos.load();
-        let world = mob.get_entity().world.load();
-        let is_village = {
-            let raids = world
-                .raids
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let Some(raid) = raids.get(raid_id) else {
-                return false;
-            };
-            if raid.is_over() {
-                return false;
-            }
-            world
-                .villager_poi
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .get_nearest_job_site(pos, 32)
-                .is_some()
-        };
-
-        !is_village
+        // Keep pathing to the raid even once a target appears.
+        Self::raid_is_calling(mob)
     }
 
     fn controls(&self) -> Controls {

@@ -98,7 +98,14 @@ impl ShulkerEntity {
             goal_selector.add_goal(7, Box::new(ShulkerPeekGoal::new(mob_arc.clone())));
             goal_selector.add_goal(8, Box::new(RandomLookAroundGoal::default()));
 
-            target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
+            target_selector.add_goal(
+                1,
+                Box::new(
+                    RevengeGoal::new(true)
+                        .ignoring(|entity_type| entity_type == &EntityType::SHULKER)
+                        .alerting_others(),
+                ),
+            );
             target_selector.add_goal(
                 2,
                 ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::PLAYER, true),
