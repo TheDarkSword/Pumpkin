@@ -137,7 +137,10 @@ impl TargetPredicate {
             }
         }
 
-        if self.respects_visibility && !tester.get_entity().has_line_of_sight(target.get_entity()) {
+        if self.respects_visibility
+            && let Some(mob) = tester.get_mob()
+            && !mob.has_line_of_sight(target.get_entity())
+        {
             return false;
         }
 

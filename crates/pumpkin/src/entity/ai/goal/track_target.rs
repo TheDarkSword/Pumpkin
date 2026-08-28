@@ -149,10 +149,7 @@ impl Goal for TrackTargetGoal {
         }
 
         if self.check_visibility {
-            let has_line_of_sight = mob_entity
-                .living_entity
-                .entity
-                .has_line_of_sight(&target.entity);
+            let has_line_of_sight = mob.has_line_of_sight(&target.entity);
 
             if !self.remembers_visible_target(has_line_of_sight) {
                 return false;

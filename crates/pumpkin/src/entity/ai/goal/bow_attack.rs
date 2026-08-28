@@ -164,7 +164,7 @@ impl Goal for BowAttackGoal {
         let target_pos = target.get_entity().pos.load();
         let distance_sq = mob_pos.squared_distance_to_vec(&target_pos);
 
-        let has_line_of_sight = mob.get_entity().has_line_of_sight(target.get_entity());
+        let has_line_of_sight = mob.has_line_of_sight(target.get_entity());
         if has_line_of_sight != (self.see_time > 0) {
             self.see_time = 0;
         }

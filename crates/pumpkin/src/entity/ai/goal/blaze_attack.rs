@@ -64,7 +64,7 @@ impl Goal for BlazeShootFireballGoal {
         true
     }
 
-    fn tick(&mut self, _mob: &dyn Mob) {
+    fn tick(&mut self, mob: &dyn Mob) {
         self.attack_time -= 1;
 
         let Some(blaze) = self.blaze.upgrade() else {
@@ -77,7 +77,7 @@ impl Goal for BlazeShootFireballGoal {
         };
 
         let entity = &blaze.entity.living_entity.entity;
-        let has_line_of_sight = entity.has_line_of_sight(target.get_entity());
+        let has_line_of_sight = mob.has_line_of_sight(target.get_entity());
 
         if has_line_of_sight {
             self.last_seen = 0;

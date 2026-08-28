@@ -159,7 +159,7 @@ impl Goal for MeleeAttackGoal {
 
         let current_target_pos = target.get_entity().pos.load();
         let has_line_of_sight =
-            self.pause_when_mob_idle || mob.get_entity().has_line_of_sight(target.get_entity());
+            self.pause_when_mob_idle || mob.has_line_of_sight(target.get_entity());
         let should_update_nav = has_line_of_sight
             && self.update_countdown_ticks <= 0
             && (self.last_target_position.is_none_or(|last_pos| {
@@ -194,7 +194,7 @@ impl Goal for MeleeAttackGoal {
 
         if self.cooldown <= 0
             && mob.get_mob_entity().is_in_attack_range(target.as_ref())
-            && mob.get_entity().has_line_of_sight(target.get_entity())
+            && mob.has_line_of_sight(target.get_entity())
         {
             self.cooldown = self.get_max_cooldown();
             mob.get_mob_entity().living_entity.swing_hand();
