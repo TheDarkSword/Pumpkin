@@ -674,6 +674,12 @@ pub trait Mob: EntityBase + Send + Sync {
         None
     }
 
+    /// How much this mob likes standing on `pos`, used to rank stroll candidates.
+    fn get_walk_target_value(&self, pos: &BlockPos) -> f32 {
+        self.as_animal()
+            .map_or(0.0, |animal| animal.animal_walk_target_value(pos))
+    }
+
     fn as_tamable(&self) -> Option<&dyn crate::entity::passive::tamable::TamableAnimal> {
         None
     }

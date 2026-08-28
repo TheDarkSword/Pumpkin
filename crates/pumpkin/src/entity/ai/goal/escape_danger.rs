@@ -1,16 +1,15 @@
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
-use rand::RngExt;
 use std::sync::atomic::Ordering::Relaxed;
 
 use super::{Controls, Goal};
 use crate::entity::ai::goal::try_find_water::TryFindWaterGoal;
+use crate::entity::ai::util::default_random_pos;
 use crate::entity::{ai::pathfinder::NavigatorGoal, mob::Mob};
 
 const WATER_SEARCH_XZ: i32 = 5;
 const WATER_SEARCH_Y: i32 = 1;
-const TARGET_ATTEMPTS: usize = 10;
 const HORIZONTAL_RANGE: i32 = 5;
 const VERTICAL_RANGE: i32 = 4;
 
@@ -77,27 +76,8 @@ impl EscapeDangerGoal {
         best.map(|(_, pos)| pos)
     }
 
-    // TODO: replace with a port of `DefaultRandomPos.getPos`, which validates the
-    // candidate against the navigation node types instead of picking any offset.
     fn find_random_position(mob: &dyn Mob) -> Option<Vector3<f64>> {
-        let pos = mob.get_mob_entity().living_entity.entity.pos.load();
-        let mut rng = mob.get_random();
-
-        for _ in 0..TARGET_ATTEMPTS {
-            let dx = rng.random_range(-HORIZONTAL_RANGE..=HORIZONTAL_RANGE);
-            let dy = rng.random_range(-VERTICAL_RANGE..=VERTICAL_RANGE);
-            let dz = rng.random_range(-HORIZONTAL_RANGE..=HORIZONTAL_RANGE);
-            if dx == 0 && dz == 0 {
-                continue;
-            }
-            return Some(Vector3::new(
-                pos.x + f64::from(dx),
-                pos.y + f64::from(dy),
-                pos.z + f64::from(dz),
-            ));
-        }
-
-        None
+        default_random_pos::get_pos(mob, HORIZONTAL_RANGE, VERTICAL_RANGE)
     }
 }
 

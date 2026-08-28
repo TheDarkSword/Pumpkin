@@ -4,6 +4,7 @@ use pumpkin_util::math::vector3::Vector3;
 
 use crate::entity::ai::goal::{Controls, Goal};
 use crate::entity::ai::pathfinder::NavigatorGoal;
+use crate::entity::ai::util::default_random_pos;
 use crate::entity::mob::Mob;
 
 pub struct PathfindToRaidGoal {
@@ -132,49 +133,36 @@ impl Goal for PathfindToRaidGoal {
         }
 
         // Pathfind towards raid center if idle
-        let pos = entity.pos.load();
-        let mut nav = mob
+        let is_idle = mob
             .get_mob_entity()
             .navigator
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_idle();
 
-        if nav.is_idle() {
-            // Generate a point towards the raid center
-            let center_vec = Vector3::new(
+        if is_idle {
+            let raid_center = Vector3::new(
                 f64::from(raid_center.0.x) + 0.5,
                 f64::from(raid_center.0.y),
                 f64::from(raid_center.0.z) + 0.5,
             );
-            let dir = center_vec - pos;
-            let dir_len = dir.x.hypot(dir.z);
-
-            let step_dist = 15.0f64.min(dir_len);
-            let norm_dir_x = if dir_len > 0.001 {
-                dir.x / dir_len
-            } else {
-                0.0
-            };
-            let norm_dir_z = if dir_len > 0.001 {
-                dir.z / dir_len
-            } else {
-                0.0
-            };
-
-            // Add slight random offset (-45 to +45 degrees)
-            let angle = (rand::random::<f64>() - 0.5) * std::f64::consts::FRAC_PI_2;
-            let cos_a = angle.cos();
-            let sin_a = angle.sin();
-            let rx = norm_dir_x * cos_a - norm_dir_z * sin_a;
-            let rz = norm_dir_x * sin_a + norm_dir_z * cos_a;
-
-            let dest = Vector3::new(pos.x + rx * step_dist, pos.y, pos.z + rz * step_dist);
-
-            nav.set_progress(NavigatorGoal {
-                current_progress: pos,
-                destination: dest,
-                speed: self.speed_modifier,
-            });
+            if let Some(dest) = default_random_pos::get_pos_towards(
+                mob,
+                15,
+                4,
+                raid_center,
+                std::f64::consts::FRAC_PI_2,
+            ) {
+                mob.get_mob_entity()
+                    .navigator
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .set_progress(NavigatorGoal::new(
+                        mob.get_entity().pos.load(),
+                        dest,
+                        self.speed_modifier,
+                    ));
+            }
         }
     }
 }

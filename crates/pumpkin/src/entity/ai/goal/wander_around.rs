@@ -1,4 +1,5 @@
 use super::{Controls, Goal, to_goal_ticks};
+use crate::entity::ai::util::default_random_pos;
 use crate::entity::{ai::pathfinder::NavigatorGoal, mob::Mob};
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
@@ -39,21 +40,8 @@ impl WanderAroundGoal {
         self.interval = interval;
     }
 
-    // TODO: replace with a port of `DefaultRandomPos.getPos`, which validates the
-    // candidate against the navigation node types instead of picking any offset.
-    fn find_wander_target(mob: &dyn Mob) -> Vector3<f64> {
-        let entity = &mob.get_mob_entity().living_entity.entity;
-        let pos = entity.pos.load();
-        let mut rng = mob.get_random();
-
-        let horizontal_range = 10.0;
-        let vertical_range = 7.0;
-
-        let dx = rng.random_range(-horizontal_range..=horizontal_range);
-        let dy = rng.random_range(-vertical_range..=vertical_range);
-        let dz = rng.random_range(-horizontal_range..=horizontal_range);
-
-        Vector3::new(pos.x + dx, pos.y + dy, pos.z + dz)
+    fn get_position(mob: &dyn Mob) -> Option<Vector3<f64>> {
+        default_random_pos::get_pos(mob, 10, 7)
     }
 }
 
@@ -75,7 +63,10 @@ impl Goal for WanderAroundGoal {
             }
         }
 
-        self.target = Some(Self::find_wander_target(mob));
+        self.target = Self::get_position(mob);
+        if self.target.is_none() {
+            return false;
+        }
         self.force_trigger = false;
         true
     }
