@@ -8,10 +8,11 @@ use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 use std::sync::Arc;
 
-const MIN_WAITING_TIME: i32 = 1200;
-const MAX_TRYING_TIME: i32 = 1200;
-const MIN_INTERVAL: i32 = 200;
+const GIVE_UP_TICKS: i32 = 1200;
+const STAY_TICKS: i32 = 1200;
+const INTERVAL_TICKS: i32 = 200;
 
+/// Mirrors vanilla Minecraft's `net.minecraft.world.entity.ai.goal.MoveToBlockGoal`.
 pub struct MoveToTargetPosGoal<M: MoveToTargetPos> {
     goal_control: Controls,
     pub move_to_target_pos: ParentHandle<M>,
@@ -55,7 +56,7 @@ impl<M: MoveToTargetPos> MoveToTargetPosGoal<M> {
     }
 
     pub fn get_interval(mob: &dyn Mob) -> i32 {
-        to_goal_ticks(MIN_INTERVAL + mob.get_random().random_range(0..MIN_INTERVAL))
+        to_goal_ticks(INTERVAL_TICKS + mob.get_random().random_range(0..INTERVAL_TICKS))
     }
 
     pub fn find_target_pos(&mut self, mob: &dyn Mob) -> bool {
@@ -104,29 +105,38 @@ impl<M: MoveToTargetPos> MoveToTargetPosGoal<M> {
         false
     }
 
-    fn get_target_pos(&self) -> BlockPos {
+    #[must_use]
+    pub fn get_target_pos(&self) -> BlockPos {
         self.target_pos.up()
     }
 
-    const fn should_reset_path(&self) -> bool {
+    #[must_use]
+    pub const fn should_reset_path(&self) -> bool {
         self.trying_time % 40 == 0
     }
 
-    fn start_moving_to_target(&self, mob: &dyn Mob) {
-        let pos = mob.get_entity().pos.load();
-        mob.get_mob_entity()
+    #[must_use]
+    pub const fn is_reached_target(&self) -> bool {
+        self.reached
+    }
+
+    pub fn move_mob_to_block(&self, mob: &dyn Mob) {
+        let target = self.get_target_pos();
+        let mut navigator = mob
+            .get_mob_entity()
             .navigator
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .set_progress(NavigatorGoal::new(
-                pos,
-                Vector3::new(
-                    f64::from(self.target_pos.0.x) + 0.5,
-                    f64::from(self.target_pos.0.y + 1),
-                    f64::from(self.target_pos.0.z) + 0.5,
-                ),
-                self.speed,
-            ));
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        navigator.set_progress(NavigatorGoal {
+            current_progress: mob.get_entity().pos.load(),
+            destination: Vector3::new(
+                target.0.x as f64 + 0.5,
+                target.0.y as f64,
+                target.0.z as f64 + 0.5,
+            ),
+            speed: self.speed,
+        });
     }
 }
 
@@ -154,34 +164,34 @@ impl<M: MoveToTargetPos> Goal for MoveToTargetPosGoal<M> {
         let can_target = self
             .move_to_target_pos
             .get()
-            .is_some_and(|x| x.is_target_pos(world, self.target_pos));
+            .is_some_and(|move_to_target_pos| {
+                move_to_target_pos.is_target_pos(world, self.target_pos)
+            });
         self.trying_time >= -self.safe_waiting_time
-            && self.trying_time <= MAX_TRYING_TIME
+            && self.trying_time <= GIVE_UP_TICKS
             && can_target
     }
 
     fn start(&mut self, mob: &dyn Mob) {
-        self.start_moving_to_target(mob);
+        self.move_mob_to_block(mob);
         self.trying_time = 0;
-        let bound = mob.get_random().random_range(0..MIN_WAITING_TIME) + MIN_WAITING_TIME;
-        self.safe_waiting_time = mob.get_random().random_range(0..bound) + MIN_WAITING_TIME;
+        let bound = mob.get_random().random_range(0..STAY_TICKS) + STAY_TICKS;
+        self.safe_waiting_time = mob.get_random().random_range(0..bound) + STAY_TICKS;
     }
 
     fn tick(&mut self, mob: &dyn Mob) {
-        let block_pos = self.get_target_pos();
-        // Measured against the block centre.
-        let block_center = Vector3::new(
-            f64::from(block_pos.0.x) + 0.5,
-            f64::from(block_pos.0.y) + 0.5,
-            f64::from(block_pos.0.z) + 0.5,
+        let target = self.get_target_pos();
+        let target_center = Vector3::new(
+            target.0.x as f64 + 0.5,
+            target.0.y as f64 + 0.5,
+            target.0.z as f64 + 0.5,
         );
-        let block_pos: Vector3<f64> = block_pos.to_f64();
         let Some(move_to_target_pos) = self.move_to_target_pos.get() else {
             return;
         };
         let desired_distance = move_to_target_pos.get_desired_distance_to_target();
 
-        if block_center.squared_distance_to_vec(&mob.get_entity().pos.load())
+        if target_center.squared_distance_to_vec(&mob.get_entity().pos.load())
             < desired_distance * desired_distance
         {
             self.reached = true;
@@ -198,7 +208,11 @@ impl<M: MoveToTargetPos> Goal for MoveToTargetPosGoal<M> {
 
                 navigator.set_progress(NavigatorGoal {
                     current_progress: mob.get_entity().pos.load(),
-                    destination: Vector3::new(block_pos.x + 0.5, block_pos.y, block_pos.z + 0.5),
+                    destination: Vector3::new(
+                        target.0.x as f64 + 0.5,
+                        target.0.y as f64,
+                        target.0.z as f64 + 0.5,
+                    ),
                     speed: self.speed,
                 });
             }

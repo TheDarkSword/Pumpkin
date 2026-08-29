@@ -53,7 +53,7 @@ impl TrackTargetGoal {
         self.target_mob = target;
     }
 
-    fn can_navigate_to_entity(&mut self, mob: &dyn Mob, _target: &dyn EntityBase) -> bool {
+    fn can_navigate_to_entity(&mut self, mob: &dyn Mob) -> bool {
         self.check_can_navigate_cooldown = to_goal_ticks(10 + mob.get_random().random_range(0..5));
         // TODO: after implementing path
         false
@@ -96,7 +96,7 @@ impl TrackTargetGoal {
             }
 
             if self.can_navigate_flag == UNSET {
-                self.can_navigate_flag = if self.can_navigate_to_entity(mob, target) {
+                self.can_navigate_flag = if self.can_navigate_to_entity(mob) {
                     CAN_TRACK
                 } else {
                     CANNOT_TRACK
