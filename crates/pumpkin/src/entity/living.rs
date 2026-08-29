@@ -2564,6 +2564,7 @@ impl LivingEntity {
             self.set_health(clamped_health);
 
             if let Some(player) = caller.get_player() {
+                player.add_exhaustion(damage_type.exhaustion);
                 player.increment_stat(
                     StatisticCategory::Custom,
                     CustomStatistic::DamageTaken as i32,

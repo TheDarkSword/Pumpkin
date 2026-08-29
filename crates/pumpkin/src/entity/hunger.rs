@@ -74,12 +74,9 @@ impl HungerManager {
             timer += 1;
             if timer >= 80 {
                 timer = 0;
-                let should_starve = match difficulty {
-                    Difficulty::Peaceful => false,
-                    Difficulty::Easy => health > 10.0,
-                    Difficulty::Normal => health > 1.0,
-                    Difficulty::Hard => true,
-                };
+                let should_starve = health > 10.0
+                    || difficulty == Difficulty::Hard
+                    || (health > 1.0 && difficulty == Difficulty::Normal);
 
                 if should_starve {
                     damage_amount = 1.0;

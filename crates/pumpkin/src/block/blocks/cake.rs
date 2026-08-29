@@ -34,16 +34,10 @@ impl CakeBlock {
     ) -> BlockActionResult {
         match player.gamemode.load() {
             GameMode::Survival | GameMode::Adventure => {
-                let hunger_level = player.hunger_manager.level.load();
-                if hunger_level >= 20 {
+                if player.hunger_manager.level.load() >= 20 {
                     return BlockActionResult::Pass;
                 }
-                player.hunger_manager.level.store(20.min(hunger_level + 2));
-                player
-                    .hunger_manager
-                    .saturation
-                    .store(player.hunger_manager.saturation.load() + 0.4);
-                player.send_health();
+                player.hunger_manager.eat(player, 2, 0.4);
             }
             GameMode::Creative | GameMode::Spectator => {}
         }
