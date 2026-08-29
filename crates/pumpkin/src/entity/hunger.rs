@@ -57,9 +57,8 @@ impl HungerManager {
             timer += 1;
             if timer >= 10 {
                 let cost = saturation.min(6.0);
-                saturation -= cost;
-                exhaustion += cost;
                 heal_amount = cost / 6.0;
+                exhaustion = (exhaustion + cost).min(MAX_EXHAUSTION);
                 timer = 0;
                 needs_sync = true;
             }
@@ -67,7 +66,7 @@ impl HungerManager {
             timer += 1;
             if timer >= 80 {
                 heal_amount = 1.0;
-                exhaustion += 6.0;
+                exhaustion = (exhaustion + 6.0).min(MAX_EXHAUSTION);
                 timer = 0;
                 needs_sync = true;
             }
@@ -111,15 +110,9 @@ impl HungerManager {
         }
     }
 
-    pub fn eat(&self, player: &Player, food: u8, saturation_modifier: f32) {
-        let added_saturation = f32::from(food) * saturation_modifier * 2.0;
-
-        let current_level = self.level.load();
-        let current_sat = self.saturation.load();
-
-        let new_level = (current_level + food).min(MAX_FOOD);
-
-        let new_sat = (current_sat + added_saturation).min(f32::from(new_level));
+    pub fn eat(&self, player: &Player, food: u8, saturation: f32) {
+        let new_level = self.level.load().saturating_add(food).min(MAX_FOOD);
+        let new_sat = (self.saturation.load() + saturation).clamp(0.0, f32::from(new_level));
 
         self.level.store(new_level);
         self.saturation.store(new_sat);
