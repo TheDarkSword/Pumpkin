@@ -3930,6 +3930,16 @@ impl Player {
         false
     }
 
+    #[must_use]
+    pub fn can_eat(&self, can_always_eat: bool) -> bool {
+        self.abilities
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .invulnerable
+            || can_always_eat
+            || self.hunger_manager.level.load() < 20
+    }
+
     pub fn can_food_heal(&self) -> bool {
         let health = self.living_entity.health.load();
         let max_health = self.living_entity.get_max_health();
