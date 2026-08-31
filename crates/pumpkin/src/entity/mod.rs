@@ -2619,6 +2619,29 @@ impl Entity {
         }
     }
 
+    /// Sets the number of ticks the entity has been frozen.
+    pub fn set_frozen_ticks(&self, ticks: i32) {
+        let new_frozen_ticks = ticks.clamp(0, Self::MAX_FROZEN_TICKS);
+        self.frozen_ticks.store(new_frozen_ticks, Ordering::Relaxed);
+        let mut bedrock_meta = SyncedActorDataList::new();
+        bedrock_meta.set(
+            entity_data_key::FREEZING_EFFECT_STRENGTH,
+            MetadataValue::Float(new_frozen_ticks as f32),
+        );
+        self.send_meta_data(
+            &[Metadata::new(
+                tracked_data::entity::DATA_TICKS_FROZEN,
+                VarInt(new_frozen_ticks),
+            )],
+            Some(&bedrock_meta),
+        );
+    }
+
+    /// Returns the number of ticks the entity has been frozen.
+    pub fn get_frozen_ticks(&self) -> i32 {
+        self.frozen_ticks.load(Ordering::Relaxed)
+    }
+
     /// Sets the `Entity` yaw & pitch rotation
     pub fn set_rotation(&self, yaw: f32, pitch: f32) {
         // TODO
@@ -2989,20 +3012,33 @@ impl Entity {
         bedrock_meta: Option<&SyncedActorDataList>,
     ) {
         let world = self.world.load();
-        let chunk_pos = self.chunk_pos.load();
         let players = world.players.load();
 
         let mut java_recipients = Vec::new();
         let mut bedrock_recipients = Vec::new();
 
-        for player in players.iter() {
-            let center = player.get_entity().chunk_pos.load();
-            let view_distance = crate::world::chunker::get_view_distance(player).get() as i32;
+        if let Some(tracked) = world.entity_tracker.get_tracked_entity(self.entity_id) {
+            for player in players.iter() {
+                if tracked.seen_by.contains(&player.gameprofile.id)
+                    || player.entity_id() == self.entity_id
+                {
+                    match player.client.as_ref() {
+                        ClientPlatform::Java(_) => java_recipients.push(player),
+                        ClientPlatform::Bedrock(client) => bedrock_recipients.push(client),
+                    }
+                }
+            }
+        } else {
+            let chunk_pos = self.chunk_pos.load();
+            for player in players.iter() {
+                let center = player.get_entity().chunk_pos.load();
+                let view_distance = crate::world::chunker::get_view_distance(player).get() as i32;
 
-            if is_within_view_distance(chunk_pos, center, view_distance) {
-                match player.client.as_ref() {
-                    ClientPlatform::Java(_) => java_recipients.push(player),
-                    ClientPlatform::Bedrock(client) => bedrock_recipients.push(client),
+                if is_within_view_distance(chunk_pos, center, view_distance) {
+                    match player.client.as_ref() {
+                        ClientPlatform::Java(_) => java_recipients.push(player),
+                        ClientPlatform::Bedrock(client) => bedrock_recipients.push(client),
+                    }
                 }
             }
         }
@@ -3212,7 +3248,7 @@ impl Entity {
             &CEntityPositionSync::new(
                 self.entity_id.into(),
                 position,
-                Vector3::new(0.0, 0.0, 0.0),
+                self.velocity.load(),
                 yaw.unwrap_or(self.yaw.load()),
                 pitch.unwrap_or(self.pitch.load()),
                 self.on_ground.load(Ordering::SeqCst),
