@@ -53,7 +53,7 @@ pub fn move_pos_up_out_of_solid(
 }
 
 /// Unlike the default variant, the malus check is left to [`move_pos_up_out_of_solid`].
-fn toward_direction(
+pub fn toward_direction(
     mob: &dyn Mob,
     world: &World,
     horizontal_dist: f64,

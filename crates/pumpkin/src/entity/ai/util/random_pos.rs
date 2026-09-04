@@ -67,6 +67,35 @@ pub fn move_up_out_of_solid(
     on_ground
 }
 
+/// Pushes `pos` up out of any solid stack, then up to `above_solid_amount` blocks
+/// further while there is room.
+pub fn move_up_to_above_solid(
+    pos: BlockPos,
+    above_solid_amount: i32,
+    max_y: i32,
+    solidity_tester: impl Fn(&BlockPos) -> bool,
+) -> BlockPos {
+    if !solidity_tester(&pos) {
+        return pos;
+    }
+
+    let mut current = pos.up();
+    while current.0.y <= max_y && solidity_tester(&current) {
+        current = current.up();
+    }
+
+    let first_non_solid_y = current.0.y;
+    while current.0.y <= max_y && current.0.y - first_non_solid_y < above_solid_amount {
+        current = current.up();
+        if solidity_tester(&current) {
+            current = current.down();
+            break;
+        }
+    }
+
+    current
+}
+
 /// Ten attempts, keep the best weighted one.
 pub fn generate_random_pos(
     mut pos_supplier: impl FnMut() -> Option<BlockPos>,
