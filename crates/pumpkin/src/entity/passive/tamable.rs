@@ -2,7 +2,6 @@ use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 
 use crossbeam::atomic::AtomicCell;
 use pumpkin_nbt::compound::NbtCompound;
-use pumpkin_protocol::java::client::play::Metadata;
 use uuid::Uuid;
 
 use crate::entity::EntityBase;
@@ -47,12 +46,9 @@ pub trait TamableAnimal: Animal {
         if tame {
             flags |= TAME_FLAG;
         }
-        entity.send_meta_data(
-            &[Metadata::new(
-                pumpkin_data::tracked_data::tamable_animal::DATA_FLAGS_ID,
-                flags as i8,
-            )],
-            None,
+        entity.set_synced_data(
+            pumpkin_data::tracked_data::tamable_animal::DATA_FLAGS_ID,
+            flags as i8,
         );
     }
 
@@ -70,12 +66,9 @@ pub trait TamableAnimal: Animal {
         if self.is_tame() {
             flags |= TAME_FLAG;
         }
-        entity.send_meta_data(
-            &[Metadata::new(
-                pumpkin_data::tracked_data::tamable_animal::DATA_FLAGS_ID,
-                flags as i8,
-            )],
-            None,
+        entity.set_synced_data(
+            pumpkin_data::tracked_data::tamable_animal::DATA_FLAGS_ID,
+            flags as i8,
         );
     }
 
@@ -109,12 +102,9 @@ pub trait TamableAnimal: Animal {
         let mob_entity = self.get_mob_entity();
         let entity = &mob_entity.living_entity.entity;
         self.get_tamable_data().owner.store(owner);
-        entity.send_meta_data(
-            &[Metadata::new(
-                pumpkin_data::tracked_data::tamable_animal::DATA_OWNERUUID_ID,
-                owner,
-            )],
-            None,
+        entity.set_synced_data(
+            pumpkin_data::tracked_data::tamable_animal::DATA_OWNERUUID_ID,
+            owner,
         );
     }
 
