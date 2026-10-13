@@ -242,6 +242,7 @@ impl PistonBlock {
             pushed_block_state: BlockState::from_id(props.to_state_id(block)),
             current_progress: 0.0.into(),
             last_progress: 0.0.into(),
+            last_ticked: 0.into(),
             extending: false,
             source: true,
         }));
@@ -358,8 +359,10 @@ pub fn try_move(world: &Arc<World>, _block: &Block, block_pos: &BlockPos) {
                 let Some(piston) = entity.as_any().downcast_ref::<PistonBlockEntity>() else {
                     return;
                 };
-                if piston.extending && piston.current_progress.load() < 0.5
-                // TODO: more stuff...
+                if piston.extending
+                    && (piston.last_progress.load() < 0.5
+                        || piston.last_ticked.load() == world.get_world_age()
+                        || World::is_handling_tick())
                 {
                     // Piston reduced too quickly, if its a stick piston no blocks will be dragged
                     r#type = TRIGGER_DROP;
@@ -447,6 +450,7 @@ fn move_piston(
                 pushed_block_state: moved_state,
                 current_progress: 0.0.into(),
                 last_progress: 0.0.into(),
+                last_ticked: 0.into(),
                 extending: extend,
                 source: false,
             }));
@@ -478,6 +482,7 @@ fn move_piston(
             pushed_block_state: BlockState::from_id(props.to_state_id(&Block::PISTON_HEAD)),
             current_progress: 0.0.into(),
             last_progress: 0.0.into(),
+            last_ticked: 0.into(),
             extending: true,
             source: true,
         }));
