@@ -7,6 +7,7 @@ use pumpkin_data::{
     Block, BlockDirection, BlockState, BlockStateId, FacingExt,
     block_properties::{MovingPistonLikeProperties, PistonHeadLikeProperties, PistonType},
     block_state::PistonBehavior,
+    game_event::GameEvent,
     sound::{Sound, SoundCategory},
 };
 use pumpkin_util::math::position::BlockPos;
@@ -191,6 +192,7 @@ impl PistonBlock {
                 0.5,
                 pitch,
             );
+            world.emit_game_event(GameEvent::BlockActivate.name(), pos.to_centered_f64());
             return true;
         }
         // Reduce Piston
@@ -299,6 +301,7 @@ impl PistonBlock {
             0.5,
             pitch,
         );
+        world.emit_game_event(GameEvent::BlockDeactivate.name(), pos.to_centered_f64());
         true
     }
 }
@@ -406,11 +409,19 @@ fn move_piston(
 
     for &broken_block_pos in broken_blocks.iter().rev() {
         let block_state = world.get_block_state(&broken_block_pos);
-        world.break_block(
-            &broken_block_pos,
-            None,
-            BlockFlags::NOTIFY_LISTENERS | BlockFlags::FORCE_STATE,
-        );
+        if world
+            .break_block(
+                &broken_block_pos,
+                None,
+                BlockFlags::NOTIFY_LISTENERS | BlockFlags::FORCE_STATE,
+            )
+            .is_some()
+        {
+            world.emit_game_event(
+                GameEvent::BlockDestroy.name(),
+                broken_block_pos.to_centered_f64(),
+            );
+        }
         affected_block_states.push(block_state);
     }
 
