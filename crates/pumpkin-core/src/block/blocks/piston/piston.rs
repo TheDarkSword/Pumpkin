@@ -254,15 +254,21 @@ impl PistonBlock {
         if sticky {
             let pull_pos = pos.offset_dir(dir.to_offset(), 2);
             let (block, state) = world.get_block_and_state(&pull_pos);
-            if r#type == TRIGGER_DROP {
-                world.set_block_state(
-                    &extended_pos,
-                    Block::AIR.default_state.id,
-                    BlockFlags::NOTIFY_ALL,
-                );
+            let piston_piece = if block == &Block::MOVING_PISTON
+                && let Some(block_entity) = world.get_block_entity(&pull_pos)
+                && let Some(piston) = block_entity.as_any().downcast_ref::<PistonBlockEntity>()
+                && piston.facing == dir
+                && piston.extending
+            {
+                piston.finish(world);
+                true
             } else {
-                let is_air = state.is_air();
-                if !is_air
+                false
+            };
+
+            if !piston_piece {
+                if r#type == TRIGGER_CONTRACT
+                    && !state.is_air()
                     && (Self::is_movable(block, state, dir, false, dir.opposite())
                         || Self::is_movable(block, state, dir, false, dir))
                     && (state.piston_behavior == PistonBehavior::Normal
